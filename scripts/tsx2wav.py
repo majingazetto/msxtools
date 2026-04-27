@@ -101,8 +101,8 @@ class TSX2WAV:
         self.accum_samples -= count
         final_value = -value if self.invert else value
         unsigned_val = (final_value + 128) & 0xFF
-        for _ in range(count):
-            self.samples.append(unsigned_val)
+        if count > 0:
+            self.samples.extend(bytes([unsigned_val] * count))
 
     def write_pulse(self, t_states):
         self.write_sample(t_states, self.current_value)
@@ -115,31 +115,21 @@ class TSX2WAV:
     def write_silence(self, ms):
         if ms <= 0: return
         num_samples = int((ms / 1000.0) * self.sample_rate)
-        for _ in range(num_samples):
-            self.samples.append(128)
+        self.samples.extend(b'\x80' * num_samples)
         self.current_value = 127
 
     def process_block_10(self, pause_ms, data):
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
-        
-        # Standard MSX timings (3.5MHz basis)
-        # 1200 Baud: 729 (one), 1458 (zero)
-        # 2400 Baud: 364 (one), 729 (zero)
-        t_pilot = 364 if self.fast else 729
-        t_one = 364 if self.fast else 729
-        t_zero = 729 if self.fast else 1458
-        
-        # Pilot: 30000 pulses (~3.1s at 2400baud) if fast, else standard 8012 (approx)
-        self.write_pulses(30000 if self.fast else 8012, t_pilot)
-        self.write_pulse(333 if self.fast else 667) # sync1
-        self.write_pulse(367 if self.fast else 735) # sync2
+        self.write_pulses(3223, 2168)
+        self.write_pulse(667)
+        self.write_pulse(735)
         for byte in data:
             for i in range(8):
-                if byte & (128 >> i): self.write_pulses(2, t_one)
-                else: self.write_pulses(2, t_zero)
+                if byte & (128 >> i): self.write_pulses(2, 1710)
+                else: self.write_pulses(2, 855)
         if pause_ms > 0: self.write_pulse(2000)
-        self.write_silence(3000 if self.fast else (pause_ms + self.extra_pause))
+        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
 
     def process_block_11(self, data):
         if len(data) < 18: return
@@ -163,24 +153,10 @@ class TSX2WAV:
     def process_block_4b(self, data):
         if len(data) < 12: return
         pause_ms = struct.unpack("<H", data[0:2])[0]
-        t_pilot_orig = struct.unpack("<H", data[2:4])[0]
-        n_pilot_orig = struct.unpack("<H", data[4:6])[0]
-        t_zero_orig = struct.unpack("<H", data[6:8])[0]
-        t_one_orig = struct.unpack("<H", data[8:10])[0]
-
-        # Default to original values
-        t_pilot, n_pilot, t_zero, t_one = t_pilot_orig, n_pilot_orig, t_zero_orig, t_one_orig
-
-        if self.fast:
-            # Detect standard 1200 baud: '1' pulse ~729, '0' pulse ~1458
-            # We allow some tolerance (729 +/- 100)
-            is_1200 = (600 < t_one_orig < 850) and (1300 < t_zero_orig < 1600)
-            if is_1200:
-                t_pilot = 364
-                n_pilot = 5000  # Standard 2400 pilot length
-                t_zero = 729
-                t_one = 364
-
+        t_pilot = 238 if self.fast else struct.unpack("<H", data[2:4])[0]
+        n_pilot = 5000 if self.fast else struct.unpack("<H", data[4:6])[0]
+        t_zero = (238*2) if self.fast else struct.unpack("<H", data[6:8])[0]
+        t_one = 238 if self.fast else struct.unpack("<H", data[8:10])[0]
         bit_cfg, byte_cfg = data[10:12]
         actual_data = data[12:]
 
@@ -209,8 +185,7 @@ class TSX2WAV:
                     for _ in range(num_zero_p): self.write_pulse(t_zero)
             for _ in range(n_stop):
                 for _ in range(num_one_p if v_stop else num_zero_p): self.write_pulse(t_one if v_stop else t_zero)
-            self.write_silence(3000 if self.fast else (pause_ms + self.extra_pause))
-
+        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
 
     def list_blocks(self, tsx_path):
         print(f"\nTSX/TZX Block List for: {os.path.basename(tsx_path)}")
@@ -309,7 +284,9 @@ class TSX2WAV:
                     elif bid == 0x21: f.read(f.read(1)[0])
                     elif bid == 0x30: f.read(f.read(1)[0])
                     else: pass
-                else: pass
+                else:
+                    if not silent: print(f"\n[!] Unknown block {hex(bid)} at pos {hex(pos)}, stopping.")
+                    break
             if not silent: print_progress(file_size, file_size, prefix='Converting:', suffix='Complete')
         
         if not silent: print(f"Detected MSX File Type: {self.detected_type}")
