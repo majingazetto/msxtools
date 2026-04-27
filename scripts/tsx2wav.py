@@ -172,14 +172,14 @@ class TSX2WAV:
         t_pilot, n_pilot, t_zero, t_one = t_pilot_orig, n_pilot_orig, t_zero_orig, t_one_orig
 
         if self.fast:
-            # Detect 1200 baud (approx 476/952/476 T-states) and speed up to 2400 (approx 238/476/238)
-            # We allow some tolerance around 1200 baud standard values
-            is_1200 = (400 < t_one_orig < 600) and (800 < t_zero_orig < 1100)
+            # Detect standard 1200 baud: '1' pulse ~729, '0' pulse ~1458
+            # We allow some tolerance (729 +/- 100)
+            is_1200 = (600 < t_one_orig < 850) and (1300 < t_zero_orig < 1600)
             if is_1200:
-                t_pilot = 238
+                t_pilot = 364
                 n_pilot = 5000  # Standard 2400 pilot length
-                t_zero = 476
-                t_one = 238
+                t_zero = 729
+                t_one = 364
 
         bit_cfg, byte_cfg = data[10:12]
         actual_data = data[12:]
