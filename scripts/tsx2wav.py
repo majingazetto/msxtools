@@ -125,13 +125,12 @@ class TSX2WAV:
         
         # Standard 1200: 2168 pilot, 1710 one, 855 zero
         # Standard 2400: 1084 pilot, 855 one, 427 zero (half of 1200)
-        # Note: 238 is the ultra-fast 2400 used in 4B. 1200's half is ~1084/427.
-        # But for consistency with 4B's --fast:
         t_pilot = 1084 if self.fast else 2168
         t_one = 855 if self.fast else 1710
         t_zero = 427 if self.fast else 855
         
-        self.write_pulses(3223, t_pilot)
+        # Pilot: 12000 pulses (~2.5s at 2400baud) if fast, else standard 3223
+        self.write_pulses(12000 if self.fast else 3223, t_pilot)
         self.write_pulse(667 if not self.fast else 333) # sync1
         self.write_pulse(735 if not self.fast else 367) # sync2
         for byte in data:
@@ -139,7 +138,7 @@ class TSX2WAV:
                 if byte & (128 >> i): self.write_pulses(2, t_one)
                 else: self.write_pulses(2, t_zero)
         if pause_ms > 0: self.write_pulse(2000)
-        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
+        self.write_silence(1000 if self.fast else (pause_ms + self.extra_pause))
 
     def process_block_11(self, data):
         if len(data) < 18: return
@@ -393,3 +392,5 @@ if __name__ == "__main__":
             converter.play()
     elif not args.ls:
         parser.print_help()
+       parser.print_help()
+elp()
