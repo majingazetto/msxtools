@@ -32,10 +32,10 @@ Detailed information about the tools in this repository.
 
 The following scripts have been updated to Python 3 for better compatibility and performance.
 
-- **Z80PRE-3.py**: Z80 Preprocessor. Handles modern assembly conveniences.
-- **bintrozo-3.py**: Split files into "trozos" (pieces) for specialized loading.
-- **png2tms-*-3.py**: A suite of tools to convert PNG images to TMS9918 (MSX1) patterns, sprites, and maps.
-- **png2sr5-3.py / png2sr8-3.py**: Convert PNGs to Screen 5/8 raw data.
-- **tiledtoraw-3.py / csvtiledtoraw-3.py**: Convert maps from the Tiled Map Editor (JSON/CSV) to MSX-ready binary format.
-- **ase2pl5-3.py**: Convert Aseprite palette files to MSX Screen 5 palette format.
-- **checksms-3.py**: Calculate checksums for SMS/MSX ROMs.
+- **Z80PRE.py**: Z80 Preprocessor. Handles modern assembly conveniences.
+- **bintrozo.py**: Split files into "trozos" (pieces) for specialized loading.
+- **png2tms-*.py**: A suite of tools to convert PNG images to TMS9918 (MSX1) patterns, sprites, and maps.
+- **png2sr5.py / png2sr8.py**: Convert PNGs to Screen 5/8 raw data.
+- **tiledtoraw.py / csvtiledtoraw.py**: Convert maps from the Tiled Map Editor (JSON/CSV) to MSX-ready binary format.
+- **ase2pl5.py**: Convert Aseprite palette files to MSX Screen 5 palette format.
+- **checksms.py**: Calculate checksums for SMS/MSX ROMs.

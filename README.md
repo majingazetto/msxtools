@@ -11,7 +11,7 @@ Custom MSX development tools and scripts. This repository serves as a centralize
 
 ## Key Features
 
-- **Improved Python 3 Scripts**: Updated versions of standard MSX conversion tools (suffixed with `-3.py`).
+- **Improved Python 3 Scripts**: Updated versions of standard MSX conversion tools (suffixed with `.py`).
 - **Unified Build System**: A single `Makefile` in the root builds all C tools and installs them to `bin/`.
 - **Verified Graphics Tools**: Specialized converters for Screen 1 (TMS9918), Screen 5, and Screen 8.
 
