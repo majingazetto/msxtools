@@ -394,8 +394,3 @@ if __name__ == "__main__":
             converter.play()
     elif not args.ls:
         parser.print_help()
-ent=(args.play and not args.output))
-        if args.play:
-            converter.play()
-    elif not args.ls:
-        parser.print_help()
