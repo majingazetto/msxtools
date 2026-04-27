@@ -121,15 +121,24 @@ class TSX2WAV:
     def process_block_10(self, pause_ms, data):
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
-        self.write_pulses(3223, 2168)
-        self.write_pulse(667)
-        self.write_pulse(735)
+        
+        # Standard MSX: 1200 baud (729/1458), 2400 baud (364/729)
+        t_pilot = 364 if self.fast else 729
+        t_one = 364 if self.fast else 729
+        t_zero = 729 if self.fast else 1458
+        
+        # Pilot: 15000 pulses (~1.5s) if fast, else standard 3223
+        self.write_pulses(15000 if self.fast else 3223, t_pilot)
+        self.write_pulse(333 if self.fast else 667) # sync1
+        self.write_pulse(367 if self.fast else 735) # sync2
+        
         for byte in data:
             for i in range(8):
-                if byte & (128 >> i): self.write_pulses(2, 1710)
-                else: self.write_pulses(2, 855)
+                if byte & (128 >> i): self.write_pulses(2, t_one)
+                else: self.write_pulses(2, t_zero)
         if pause_ms > 0: self.write_pulse(2000)
-        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
+        # 2500ms silence for animations in fast mode
+        self.write_silence(2500 if self.fast else (pause_ms + self.extra_pause))
 
     def process_block_11(self, data):
         if len(data) < 18: return
@@ -153,10 +162,11 @@ class TSX2WAV:
     def process_block_4b(self, data):
         if len(data) < 12: return
         pause_ms = struct.unpack("<H", data[0:2])[0]
-        t_pilot = 238 if self.fast else struct.unpack("<H", data[2:4])[0]
-        n_pilot = 5000 if self.fast else struct.unpack("<H", data[4:6])[0]
-        t_zero = (238*2) if self.fast else struct.unpack("<H", data[6:8])[0]
-        t_one = 238 if self.fast else struct.unpack("<H", data[8:10])[0]
+        t_pilot = 364 if self.fast else struct.unpack("<H", data[2:4])[0]
+        # Intermediate pilot count
+        n_pilot = 15000 if self.fast else struct.unpack("<H", data[4:6])[0]
+        t_zero = 729 if self.fast else struct.unpack("<H", data[6:8])[0]
+        t_one = 364 if self.fast else struct.unpack("<H", data[8:10])[0]
         bit_cfg, byte_cfg = data[10:12]
         actual_data = data[12:]
 
@@ -174,6 +184,10 @@ class TSX2WAV:
         n_stop, v_stop = (byte_cfg >> 3) & 3, (byte_cfg >> 2) & 1
         msb = byte_cfg & 1
         self.write_pulses(n_pilot, t_pilot)
+        if self.fast:
+            self.write_pulse(333) # sync1
+            self.write_pulse(367) # sync2
+            
         for byte in actual_data:
             for _ in range(n_start):
                 for _ in range(num_one_p if v_start else num_zero_p): self.write_pulse(t_one if v_start else t_zero)
@@ -185,7 +199,9 @@ class TSX2WAV:
                     for _ in range(num_zero_p): self.write_pulse(t_zero)
             for _ in range(n_stop):
                 for _ in range(num_one_p if v_stop else num_zero_p): self.write_pulse(t_one if v_stop else t_zero)
-        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
+        
+        # 2500ms silence for animations in fast mode
+        self.write_silence(2500 if self.fast else (pause_ms + self.extra_pause))
 
     def list_blocks(self, tsx_path):
         print(f"\nTSX/TZX Block List for: {os.path.basename(tsx_path)}")
@@ -244,7 +260,8 @@ class TSX2WAV:
 
     def convert(self, tsx_path, wav_path=None, lead_in=0, silent=False):
         file_size = os.path.getsize(tsx_path)
-        if lead_in > 0: self.write_silence(lead_in)
+        effective_lead_in = lead_in if lead_in > 0 else (1000 if self.fast else 0)
+        if effective_lead_in > 0: self.write_silence(effective_lead_in)
         with open(tsx_path, "rb") as f:
             sig = f.read(10)
             if sig[0:8] != b"ZXTape!\x1a":
