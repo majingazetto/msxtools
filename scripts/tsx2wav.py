@@ -78,10 +78,17 @@ class TSX2WAV:
         0x35: "Custom Info Block", 0x4B: "Kansas City Standard (MSX)", 0x5A: "Glue Block"
     }
 
+    ARCHIVE_FIELDS = {
+        0x00: "Title", 0x01: "Publisher", 0x02: "Author", 0x03: "Release Date",
+        0x04: "Language", 0x05: "Game Type", 0x06: "Price", 0x07: "Protection",
+        0x08: "Origin", 0xFF: "Comment"
+    }
+
     def __init__(self, sample_rate=DEFAULT_OUTPUT_FREQ, fast=False, invert=False, extra_pause=0):
         self.sample_rate, self.fast, self.invert, self.extra_pause = sample_rate, fast, invert, extra_pause
         self.current_value, self.phase_changed, self.samples, self.accum_samples = 127, False, bytearray(), 0.0
         self.detected_type, self.block_map = "UNKNOWN", []
+        self.metadata = {} # Metadata found in the TSX
 
     def get_msx_info(self, data):
         if len(data) < 16: return None
@@ -122,7 +129,6 @@ class TSX2WAV:
         self.phase_changed = False
         is_data = (data[0] == 0xFF) if data else True
         n_pilot_std = 3223 if is_data else 8063
-        # Block 10 is ALWAYS standard speed
         t_p, t_1, t_0, n_p, s1, s2 = 2168, 1710, 855, n_pilot_std, 667, 735
         self.write_pulses(n_p, t_p); self.write_pulse(s1); self.write_pulse(s2)
         for byte in data:
@@ -223,21 +229,28 @@ class TSX2WAV:
                     blen = struct.unpack("<I", f.read(4))[0]; data = f.read(blen); msx = self.get_msx_info(data[12:])
                     if msx: current_info = f"MSX {msx}"
                     self.block_map.append((len(self.samples), current_info)); self.process_block_4b(data)
+                elif bid == 0x30:
+                    l = f.read(1)[0]; txt = f.read(l).decode('ascii', 'ignore').strip()
+                    if txt: self.metadata["Description"] = txt
+                elif bid == 0x32:
+                    blen = struct.unpack("<H", f.read(2))[0]; bdata = f.read(blen)
+                    num_strings = bdata[0]; ptr = 1
+                    for _ in range(num_strings):
+                        if ptr >= blen: break
+                        tid = bdata[ptr]; slen = bdata[ptr+1]; ptr += 2
+                        stxt = bdata[ptr:ptr+slen].decode('ascii', 'ignore').strip()
+                        ptr += slen
+                        fname = self.ARCHIVE_FIELDS.get(tid, f"Field {hex(tid)}")
+                        if stxt: self.metadata[fname] = stxt
                 else:
                     self.block_map.append((len(self.samples), current_info))
                     if bid == 0x11: hdr = f.read(0x12); dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]; self.process_block_11(hdr + f.read(dlen))
                     elif bid == 0x12: t, n = struct.unpack("<HH", f.read(4)); self.write_pulses(n, t)
-                    elif bid == 0x13:
-                        n = f.read(1)[0]
-                        for _ in range(n): self.write_pulse(struct.unpack("<H", f.read(2))[0])
+                    elif bid == 0x13: n = f.read(1)[0]; [self.write_pulse(struct.unpack("<H", f.read(2))[0]) for _ in range(n)]
                     elif bid == 0x20: self.write_silence(struct.unpack("<H", f.read(2))[0])
                     elif bid == 0x2B: self.phase_changed = True; self.current_value = -127 if struct.unpack("<I", f.read(4))[0] == 0 else 127; f.read(1)
-                    elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
                     elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
-                    elif bid in (0x5A, 0x21, 0x30, 0x22):
-                        if bid == 0x5A: f.read(9)
-                        elif bid == 0x21: f.read(f.read(1)[0])
-                        elif bid == 0x30: f.read(f.read(1)[0])
+                    elif bid in (0x5A, 0x21, 0x30, 0x22): [f.read(9) if bid==0x5A else f.read(f.read(1)[0]) if bid in (0x21, 0x30) else None]
                     else: break
             if not silent: print_progress(file_size, file_size, prefix='Converting:', suffix='Complete')
         if wav_path:
@@ -250,8 +263,17 @@ class TSX2WAV:
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as twf:
             temp_name = twf.name
             with wave.open(twf, 'wb') as wf: wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate); wf.writeframes(self.samples)
+        
         print("\n" + f"{C_YELLOW}═{C_RESET}"*70 + f"\n {C_BOLD}{C_CYAN}MSX TAPE PLAYER{C_RESET}\n" + f"{C_YELLOW}═{C_RESET}"*70)
-        print(f" {C_BOLD}ENTRY TYPE  :{C_RESET} {C_GREEN}{self.detected_type}{C_RESET}\n {C_BOLD}MSX COMMAND :{C_RESET} {C_YELLOW}{cmd_text}{C_RESET}\n" + f"{C_YELLOW}─{C_RESET}"*70 + "\n\n")
+        
+        # Display Metadata if available
+        if self.metadata:
+            for k, v in self.metadata.items():
+                print(f" {C_BOLD}{k:<12}:{C_RESET} {C_YELLOW}{v}{C_RESET}")
+            print(f"{C_YELLOW}─{C_RESET}"*70)
+            
+        print(f" {C_BOLD}ENTRY TYPE  :{C_RESET} {C_GREEN}{self.detected_type}{C_RESET}\n {C_BOLD}MSX COMMAND :{C_RESET} {C_CYAN}{cmd_text}{C_RESET}\n" + f"{C_YELLOW}═{C_RESET}"*70 + "\n\n")
+        
         duration = len(self.samples) / float(self.sample_rate)
         try:
             process = subprocess.Popen(["aplay", "-q", "-c", "1", temp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
