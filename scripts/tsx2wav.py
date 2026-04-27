@@ -123,22 +123,23 @@ class TSX2WAV:
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
         
-        # Standard 1200: 2168 pilot, 1710 one, 855 zero
-        # Standard 2400: 1084 pilot, 855 one, 427 zero (half of 1200)
-        t_pilot = 1084 if self.fast else 2168
-        t_one = 855 if self.fast else 1710
-        t_zero = 427 if self.fast else 855
+        # Standard MSX timings (3.5MHz basis)
+        # 1200 Baud: 729 (one), 1458 (zero)
+        # 2400 Baud: 364 (one), 729 (zero)
+        t_pilot = 364 if self.fast else 729
+        t_one = 364 if self.fast else 729
+        t_zero = 729 if self.fast else 1458
         
-        # Pilot: 12000 pulses (~2.5s at 2400baud) if fast, else standard 3223
-        self.write_pulses(12000 if self.fast else 3223, t_pilot)
-        self.write_pulse(667 if not self.fast else 333) # sync1
-        self.write_pulse(735 if not self.fast else 367) # sync2
+        # Pilot: 30000 pulses (~3.1s at 2400baud) if fast, else standard 8012 (approx)
+        self.write_pulses(30000 if self.fast else 8012, t_pilot)
+        self.write_pulse(333 if self.fast else 667) # sync1
+        self.write_pulse(367 if self.fast else 735) # sync2
         for byte in data:
             for i in range(8):
                 if byte & (128 >> i): self.write_pulses(2, t_one)
                 else: self.write_pulses(2, t_zero)
         if pause_ms > 0: self.write_pulse(2000)
-        self.write_silence(1000 if self.fast else (pause_ms + self.extra_pause))
+        self.write_silence(3000 if self.fast else (pause_ms + self.extra_pause))
 
     def process_block_11(self, data):
         if len(data) < 18: return
@@ -208,7 +209,8 @@ class TSX2WAV:
                     for _ in range(num_zero_p): self.write_pulse(t_zero)
             for _ in range(n_stop):
                 for _ in range(num_one_p if v_stop else num_zero_p): self.write_pulse(t_one if v_stop else t_zero)
-        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
+            self.write_silence(3000 if self.fast else (pause_ms + self.extra_pause))
+
 
     def list_blocks(self, tsx_path):
         print(f"\nTSX/TZX Block List for: {os.path.basename(tsx_path)}")
@@ -388,6 +390,11 @@ if __name__ == "__main__":
     
     if args.output or args.play:
         converter.convert(args.input, args.output, silent=(args.play and not args.output))
+        if args.play:
+            converter.play()
+    elif not args.ls:
+        parser.print_help()
+ent=(args.play and not args.output))
         if args.play:
             converter.play()
     elif not args.ls:
