@@ -14,15 +14,24 @@ TZX_Z80_FREQ = 3500000  # 3.5MHz
 DEFAULT_OUTPUT_FREQ = 96000 
 AMPLITUDE = 126 
 
+# ANSI Colors
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+C_CYAN = "\033[36m"
+C_GREEN = "\033[32m"
+C_YELLOW = "\033[33m"
+C_RED = "\033[31m"
+C_BLUE = "\033[34m"
+C_MAGENTA = "\033[35m"
+
 def print_progress(current, total, prefix='', suffix='', length=50, fill='█'):
     if total <= 0: return
     current = max(0, min(current, total))
     percent = ("{0:.1f}").format(100 * (current / float(total)))
     filled_length = int(length * current // total)
     bar = fill * filled_length + '-' * (length - filled_length)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end='\r', flush=True)
-    if current >= total:
-        print()
+    print(f'\r{prefix} |{C_GREEN}{bar}{C_RESET}| {percent}% {suffix}', end='\r', flush=True)
+    if current >= total: print()
 
 def get_real_wave_anim(data, current_sample, sample_width, window_size=240, anim_len=20):
     if not data: return " " * anim_len
@@ -46,71 +55,61 @@ def get_real_wave_anim(data, current_sample, sample_width, window_size=240, anim
         out += chars[idx]
     return out
 
-def print_play_progress(current, total, wave_gfx, length=40):
+def print_play_progress(current, total, wave_gfx, block_info, wave_color, length=40):
     percent = ("{0:.1f}").format(100 * (current / float(total)))
     filled_length = int(length * current // total)
     bar = '█' * filled_length + '-' * (length - filled_length)
     curr_t = f"{int(current // 60):02d}:{int(current % 60):02d}"
     total_t = f"{int(total // 60):02d}:{int(total % 60):02d}"
-    sys.stdout.write(f'\r {wave_gfx} |{bar}| {percent}% [{curr_t}/{total_t}]')
+    sys.stdout.write('\r\033[K') 
+    sys.stdout.write(f' {C_BOLD}BLOCK:{C_RESET} {C_CYAN}{block_info:<40}{C_RESET}\n')
+    sys.stdout.write('\033[K') 
+    sys.stdout.write(f' {wave_color}{wave_gfx}{C_RESET} |{C_GREEN}{bar}{C_RESET}| {C_BOLD}{percent:>5}%{C_RESET} [{curr_t}/{total_t}]')
+    sys.stdout.write('\033[F') 
     sys.stdout.flush()
 
 class TSX2WAV:
     BLOCK_NAMES = {
-        0x10: "Standard Speed Data Block",
-        0x11: "Turbo Speed Data Block",
-        0x12: "Pure Tone",
-        0x13: "Pulse Sequence",
-        0x14: "Pure Data Block",
-        0x15: "Direct Recording Block",
-        0x20: "Silence / Pause Block",
-        0x21: "Group Start",
-        0x22: "Group End",
-        0x23: "Jump to Block",
-        0x24: "Loop Start",
-        0x25: "Loop End",
-        0x26: "Call Sequence",
-        0x27: "Return from Sequence",
-        0x28: "Select Block",
-        0x2A: "Stop the Tape if in 48K Mode",
-        0x2B: "Signal Level",
-        0x30: "Text Description",
-        0x31: "Message Block",
-        0x32: "Archive Info",
-        0x33: "Hardware Type",
-        0x35: "Custom Info Block",
-        0x4B: "Kansas City Standard (MSX)",
-        0x5A: "Glue Block"
+        0x10: "Standard Speed Data", 0x11: "Turbo Speed Data", 0x12: "Pure Tone",
+        0x13: "Pulse Sequence", 0x14: "Pure Data", 0x15: "Direct Recording",
+        0x20: "Silence / Pause", 0x21: "Group Start", 0x22: "Group End",
+        0x23: "Jump to Block", 0x24: "Loop Start", 0x25: "Loop End",
+        0x2B: "Signal Level", 0x30: "Text Description", 0x32: "Archive Info",
+        0x35: "Custom Info Block", 0x4B: "Kansas City Standard (MSX)", 0x5A: "Glue Block"
     }
 
     def __init__(self, sample_rate=DEFAULT_OUTPUT_FREQ, fast=False, invert=False, extra_pause=0):
-        self.sample_rate = sample_rate
-        self.fast = fast
-        self.invert = invert
-        self.extra_pause = extra_pause
-        self.current_value = 127
-        self.phase_changed = False
-        self.samples = bytearray()
-        self.accum_samples = 0.0
-        self.detected_type = "UNKNOWN"
+        self.sample_rate, self.fast, self.invert, self.extra_pause = sample_rate, fast, invert, extra_pause
+        self.current_value, self.phase_changed, self.samples, self.accum_samples = 127, False, bytearray(), 0.0
+        self.detected_type, self.block_map = "UNKNOWN", []
+
+    def get_msx_info(self, data):
+        if len(data) < 16: return None
+        h_bin, h_bas, h_asc = b"\xd0"*10, b"\xd3"*10, b"\xea"*10
+        m_type = ""
+        if data[0:10] == h_bin: m_type = "BINARY"
+        elif data[0:10] == h_bas: m_type = "BASIC"
+        elif data[0:10] == h_asc: m_type = "ASCII"
+        if m_type:
+            if self.detected_type == "UNKNOWN" or m_type == "BASIC": self.detected_type = m_type
+            name = data[10:16].decode('ascii', 'ignore').strip()
+            return f"{m_type} (\"{name}\")"
+        return None
 
     def write_sample(self, t_states, value):
         num_samples_float = (t_states * self.sample_rate) / TZX_Z80_FREQ
         self.accum_samples += num_samples_float
         count = int(self.accum_samples)
         self.accum_samples -= count
-        final_value = -value if self.invert else value
-        unsigned_val = (final_value + 128) & 0xFF
-        if count > 0:
-            self.samples.extend(bytes([unsigned_val] * count))
+        unsigned_val = ((-value if self.invert else value) + 128) & 0xFF
+        if count > 0: self.samples.extend(bytes([unsigned_val] * count))
 
     def write_pulse(self, t_states):
         self.write_sample(t_states, self.current_value)
         self.current_value = -self.current_value
 
     def write_pulses(self, count, t_states):
-        for _ in range(count):
-            self.write_pulse(t_states)
+        for _ in range(count): self.write_pulse(t_states)
 
     def write_silence(self, ms):
         if ms <= 0: return
@@ -121,270 +120,176 @@ class TSX2WAV:
     def process_block_10(self, pause_ms, data):
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
-        
-        # Standard MSX: 1200 baud (729/1458), 2400 baud (364/729)
-        t_pilot = 364 if self.fast else 729
-        t_one = 364 if self.fast else 729
-        t_zero = 729 if self.fast else 1458
-        
-        # Pilot: 15000 pulses (~1.5s) if fast, else standard 3223
-        self.write_pulses(15000 if self.fast else 3223, t_pilot)
-        self.write_pulse(333 if self.fast else 667) # sync1
-        self.write_pulse(367 if self.fast else 735) # sync2
-        
+        is_data = (data[0] == 0xFF) if data else True
+        n_pilot_std = 3223 if is_data else 8063
+        # Block 10 is ALWAYS standard speed
+        t_p, t_1, t_0, n_p, s1, s2 = 2168, 1710, 855, n_pilot_std, 667, 735
+        self.write_pulses(n_p, t_p); self.write_pulse(s1); self.write_pulse(s2)
         for byte in data:
             for i in range(8):
-                if byte & (128 >> i): self.write_pulses(2, t_one)
-                else: self.write_pulses(2, t_zero)
+                if byte & (128 >> i): self.write_pulses(2, t_1)
+                else: self.write_pulses(2, t_0)
         if pause_ms > 0: self.write_pulse(2000)
-        # 2500ms silence for animations in fast mode
-        self.write_silence(2500 if self.fast else (pause_ms + self.extra_pause))
+        self.write_silence(pause_ms + self.extra_pause)
 
     def process_block_11(self, data):
-        if len(data) < 18: return
         pilot_t, sync1_t, sync2_t, zero_t, one_t, pilot_n = struct.unpack("<HHHHHH", data[0:12])
-        last_bits = data[12]
-        pause_ms = struct.unpack("<H", data[13:15])[0]
+        last_bits, pause_ms = data[12], struct.unpack("<H", data[13:15])[0]
         actual_data = data[18:]
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
-        self.write_pulses(pilot_n, pilot_t)
-        self.write_pulse(sync1_t)
-        self.write_pulse(sync2_t)
+        self.write_pulses(pilot_n, pilot_t); self.write_pulse(sync1_t); self.write_pulse(sync2_t)
         for i, byte in enumerate(actual_data):
             bits = 8 if i < len(actual_data)-1 else (last_bits if last_bits else 8)
             for b in range(bits):
                 if byte & (128 >> b): self.write_pulses(2, one_t)
                 else: self.write_pulses(2, zero_t)
         if pause_ms > 0: self.write_pulse(2000)
-        self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
+        self.write_silence(pause_ms + self.extra_pause)
 
     def process_block_4b(self, data):
-        if len(data) < 12: return
         pause_ms = struct.unpack("<H", data[0:2])[0]
-        t_pilot = 364 if self.fast else struct.unpack("<H", data[2:4])[0]
-        # Intermediate pilot count
-        n_pilot = 15000 if self.fast else struct.unpack("<H", data[4:6])[0]
-        t_zero = 729 if self.fast else struct.unpack("<H", data[6:8])[0]
-        t_one = 364 if self.fast else struct.unpack("<H", data[8:10])[0]
-        bit_cfg, byte_cfg = data[10:12]
-        actual_data = data[12:]
-
-        # MSX Header Detection
-        if self.detected_type == "UNKNOWN" and len(actual_data) >= 10:
-            if actual_data[0:10] == b"\xd0"*10: self.detected_type = "BINARY"
-            elif actual_data[0:10] == b"\xd3"*10: self.detected_type = "BASIC"
-            elif actual_data[0:10] == b"\xea"*10: self.detected_type = "ASCII"
-
+        if self.fast:
+            t_p, n_p, t_0, t_1 = 364, 15000, 729, 364
+        else:
+            t_p, n_p, t_0, t_1 = struct.unpack("<HHHH", data[2:10])
+        bit_cfg, byte_cfg, actual_data = data[10], data[11], data[12:]
         if not self.phase_changed: self.current_value = 127
         self.phase_changed = False
-        num_zero_p = (bit_cfg >> 4) if (bit_cfg >> 4) else 16
-        num_one_p = (bit_cfg & 0x0F) if (bit_cfg & 0x0F) else 16
+        n_0, n_1 = (bit_cfg >> 4) or 16, (bit_cfg & 0x0F) or 16
         n_start, v_start = (byte_cfg >> 6) & 3, (byte_cfg >> 5) & 1
         n_stop, v_stop = (byte_cfg >> 3) & 3, (byte_cfg >> 2) & 1
         msb = byte_cfg & 1
-        self.write_pulses(n_pilot, t_pilot)
-        if self.fast:
-            self.write_pulse(333) # sync1
-            self.write_pulse(367) # sync2
-            
+        self.write_pulses(n_p, t_p)
+        if self.fast: self.write_pulse(333); self.write_pulse(367)
         for byte in actual_data:
             for _ in range(n_start):
-                for _ in range(num_one_p if v_start else num_zero_p): self.write_pulse(t_one if v_start else t_zero)
+                for _ in range(n_1 if v_start else n_0): self.write_pulse(t_1 if v_start else t_0)
             for i in range(8):
                 bit = (byte >> (7-i if msb else i)) & 1
-                if bit:
-                    for _ in range(num_one_p): self.write_pulse(t_one)
-                else:
-                    for _ in range(num_zero_p): self.write_pulse(t_zero)
+                for _ in range(n_1 if bit else n_0): self.write_pulse(t_1 if bit else t_0)
             for _ in range(n_stop):
-                for _ in range(num_one_p if v_stop else num_zero_p): self.write_pulse(t_one if v_stop else t_zero)
-        
-        # 2500ms silence for animations in fast mode
-        self.write_silence(2500 if self.fast else (pause_ms + self.extra_pause))
+                for _ in range(n_1 if v_stop else n_0): self.write_pulse(t_1 if v_stop else t_0)
+        self.write_silence(pause_ms + self.extra_pause)
 
     def list_blocks(self, tsx_path):
-        print(f"\nTSX/TZX Block List for: {os.path.basename(tsx_path)}")
+        print(f"\n{C_BOLD}TSX/TZX Block List for:{C_RESET} {C_YELLOW}{os.path.basename(tsx_path)}{C_RESET}")
         print("-" * 60)
         with open(tsx_path, "rb") as f:
             sig = f.read(10)
-            if sig[0:8] != b"ZXTape!\x1a":
-                print(f"Error: Invalid signature {sig[0:8]}"); return
-            print(f"Version: {sig[8]}.{sig[9]}")
+            if sig[0:8] != b"ZXTape!\x1a": return
             while True:
                 pos = f.tell()
                 bid_raw = f.read(1)
                 if not bid_raw: break
                 bid = bid_raw[0]
                 name = self.BLOCK_NAMES.get(bid, f"Unknown Block ({hex(bid)})")
-                print(f"[{hex(pos)}] ID {hex(bid)}: {name}")
-                if bid == 0x10:
-                    pause, length = struct.unpack("<HH", f.read(4))
-                    print(f"  Length: {length}, Pause: {pause}ms")
-                    f.read(length)
-                elif bid == 0x11:
-                    hdr = f.read(0x12)
-                    dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]
-                    print(f"  Data Length: {dlen}")
-                    f.read(dlen)
+                print(f"[{C_GREEN}{hex(pos)}{C_RESET}] ID {C_YELLOW}{hex(bid)}{C_RESET}: {C_CYAN}{name}{C_RESET}")
+                if bid == 0x10: f.read(struct.unpack("<HH", f.read(4))[1])
+                elif bid == 0x11: f.read(struct.unpack("<I", f.read(0x12)[0x0F:0x12] + b"\x00")[0])
                 elif bid == 0x12: f.read(4)
                 elif bid == 0x13: f.read(1 + f.read(1)[0] * 2)
                 elif bid == 0x14: f.read(7 + struct.unpack("<I", f.read(3) + b"\x00")[0])
-                elif bid == 0x20: print(f"  Pause: {struct.unpack('<H', f.read(2))[0]}ms")
-                elif bid == 0x21: f.read(f.read(1)[0])
-                elif bid == 0x22: pass
-                elif bid == 0x23: f.read(2)
-                elif bid == 0x24: f.read(2)
-                elif bid == 0x25: pass
+                elif bid in (0x20, 0x23, 0x24): f.read(2)
+                elif bid in (0x21, 0x30): f.read(f.read(1)[0])
                 elif bid == 0x2B: f.read(5)
-                elif bid == 0x30:
-                    l = f.read(1)[0]
-                    txt = f.read(l).decode('ascii', 'ignore')
-                    print(f"  Description: {txt}")
-                elif bid == 0x32:
-                    l = struct.unpack("<H", f.read(2))[0]
-                    f.read(l)
-                elif bid == 0x35:
-                    f.read(16)
-                    l = struct.unpack("<I", f.read(4))[0]
-                    f.read(l)
-                elif bid == 0x4B:
-                    blen = struct.unpack("<I", f.read(4))[0]
-                    print(f"  Length: {blen}")
-                    f.read(blen)
+                elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
+                elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
+                elif bid == 0x4B: f.read(struct.unpack("<I", f.read(4))[0])
                 elif bid == 0x5A: f.read(9)
-                else:
-                    print(f"  [!] Cannot parse block {hex(bid)}, stopping.")
-                    break
+                else: break
         print("-" * 60 + "\n")
 
     def convert(self, tsx_path, wav_path=None, lead_in=0, silent=False):
         file_size = os.path.getsize(tsx_path)
         effective_lead_in = lead_in if lead_in > 0 else (1000 if self.fast else 0)
-        if effective_lead_in > 0: self.write_silence(effective_lead_in)
+        if effective_lead_in > 0: self.block_map.append((0, "Silence (Lead-in)")); self.write_silence(effective_lead_in)
         with open(tsx_path, "rb") as f:
             sig = f.read(10)
-            if sig[0:8] != b"ZXTape!\x1a":
-                if not silent: print(f"Error: Invalid signature {sig[0:8]}")
-                return
+            if sig[0:8] != b"ZXTape!\x1a": return
             while True:
                 pos = f.tell()
-                if not silent: print_progress(pos, file_size, prefix='Converting:', suffix=f'Pos {pos}')
+                if not silent: print_progress(pos, file_size, prefix='Converting:', suffix=f'Pos {hex(pos)}')
                 bid_raw = f.read(1)
                 if not bid_raw: break
                 bid = bid_raw[0]
+                b_name = self.BLOCK_NAMES.get(bid, f"Block {hex(bid)}")
+                current_info = b_name
                 if bid == 0x10:
-                    pause, length = struct.unpack("<HH", f.read(4))
-                    self.process_block_10(pause, f.read(length))
-                elif bid == 0x11:
-                    hdr = f.read(0x12)
-                    dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]
-                    self.process_block_11(hdr + f.read(dlen))
-                elif bid == 0x12:
-                    t, n = struct.unpack("<HH", f.read(4))
-                    self.write_pulses(n, t)
-                elif bid == 0x13:
-                    n = f.read(1)[0]
-                    for _ in range(n): self.write_pulse(struct.unpack("<H", f.read(2))[0])
-                elif bid == 0x20: self.write_silence(struct.unpack("<H", f.read(2))[0])
-                elif bid == 0x2B:
-                    self.phase_changed = True
-                    self.current_value = -127 if struct.unpack("<I", f.read(4))[0] == 0 else 127
-                    f.read(1)
+                    pause, length = struct.unpack("<HH", f.read(4)); data = f.read(length); msx = self.get_msx_info(data)
+                    if msx: current_info = f"MSX {msx}"
+                    self.block_map.append((len(self.samples), current_info)); self.process_block_10(pause, data)
                 elif bid == 0x4B:
-                    blen = struct.unpack("<I", f.read(4))[0]
-                    self.process_block_4b(f.read(blen))
-                elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
-                elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
-                elif bid in (0x5A, 0x21, 0x30, 0x22):
-                    if bid == 0x5A: f.read(9)
-                    elif bid == 0x21: f.read(f.read(1)[0])
-                    elif bid == 0x30: f.read(f.read(1)[0])
-                    else: pass
+                    blen = struct.unpack("<I", f.read(4))[0]; data = f.read(blen); msx = self.get_msx_info(data[12:])
+                    if msx: current_info = f"MSX {msx}"
+                    self.block_map.append((len(self.samples), current_info)); self.process_block_4b(data)
                 else:
-                    if not silent: print(f"\n[!] Unknown block {hex(bid)} at pos {hex(pos)}, stopping.")
-                    break
+                    self.block_map.append((len(self.samples), current_info))
+                    if bid == 0x11: hdr = f.read(0x12); dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]; self.process_block_11(hdr + f.read(dlen))
+                    elif bid == 0x12: t, n = struct.unpack("<HH", f.read(4)); self.write_pulses(n, t)
+                    elif bid == 0x13:
+                        n = f.read(1)[0]
+                        for _ in range(n): self.write_pulse(struct.unpack("<H", f.read(2))[0])
+                    elif bid == 0x20: self.write_silence(struct.unpack("<H", f.read(2))[0])
+                    elif bid == 0x2B: self.phase_changed = True; self.current_value = -127 if struct.unpack("<I", f.read(4))[0] == 0 else 127; f.read(1)
+                    elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
+                    elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
+                    elif bid in (0x5A, 0x21, 0x30, 0x22):
+                        if bid == 0x5A: f.read(9)
+                        elif bid == 0x21: f.read(f.read(1)[0])
+                        elif bid == 0x30: f.read(f.read(1)[0])
+                    else: break
             if not silent: print_progress(file_size, file_size, prefix='Converting:', suffix='Complete')
-        
-        if not silent: print(f"Detected MSX File Type: {self.detected_type}")
-        
         if wav_path:
-            if not silent: print(f"Writing {len(self.samples)} samples to {wav_path}...")
-            with wave.open(wav_path, "wb") as wf:
-                wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate)
-                wf.writeframes(self.samples)
-            meta_path = wav_path + ".json"
-            with open(meta_path, "w") as jf:
-                json.dump({"type": self.detected_type}, jf)
+            with wave.open(wav_path, "wb") as wf: wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate); wf.writeframes(self.samples)
 
     def play(self):
-        if not self.samples:
-            print("No audio data to play."); return
-
-        instructions = {
-            "BINARY": 'BLOAD"CAS:",R',
-            "BASIC": 'RUN"CAS:"',
-            "ASCII": 'LOAD"CAS:",R',
-            "UNKNOWN": 'RUN"CAS:" or BLOAD"CAS:",R'
-        }
+        if not self.samples: return
+        instructions = { "BINARY": 'BLOAD"CAS:",R', "BASIC": 'RUN"CAS:"', "ASCII": 'LOAD"CAS:",R', "UNKNOWN": 'RUN"CAS:" or BLOAD"CAS:",R' }
         cmd_text = instructions.get(self.detected_type, instructions["UNKNOWN"])
-
-        # Write to a temporary file for aplay
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as twf:
             temp_name = twf.name
-            with wave.open(twf, 'wb') as wf:
-                wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate)
-                wf.writeframes(self.samples)
-
-        print("\n" + "="*70)
-        print(f" MSX TAPE PLAYER")
-        print("="*70)
-        print(f" TYPE: {self.detected_type}")
-        print("-" * 70)
-        print(f" On MSX, type: {cmd_text}")
-        print("-" * 70)
-
+            with wave.open(twf, 'wb') as wf: wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate); wf.writeframes(self.samples)
+        print("\n" + f"{C_YELLOW}═{C_RESET}"*70 + f"\n {C_BOLD}{C_CYAN}MSX TAPE PLAYER{C_RESET}\n" + f"{C_YELLOW}═{C_RESET}"*70)
+        print(f" {C_BOLD}ENTRY TYPE  :{C_RESET} {C_GREEN}{self.detected_type}{C_RESET}\n {C_BOLD}MSX COMMAND :{C_RESET} {C_YELLOW}{cmd_text}{C_RESET}\n" + f"{C_YELLOW}─{C_RESET}"*70 + "\n\n")
         duration = len(self.samples) / float(self.sample_rate)
         try:
-            process = subprocess.Popen(["aplay", "-q", "-c", "1", temp_name], 
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process = subprocess.Popen(["aplay", "-q", "-c", "1", temp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             start_time = time.time()
             while process.poll() is None:
                 elapsed = time.time() - start_time
                 if elapsed > duration: elapsed = duration
                 current_sample = int(elapsed * self.sample_rate)
-                wave_gfx = get_real_wave_anim(self.samples, current_sample, 1)
-                print_play_progress(elapsed, duration, wave_gfx)
+                current_info = "Silence"; wave_color = C_RED
+                for start, info in self.block_map:
+                    if current_sample >= start:
+                        current_info = info
+                        if "BASIC" in info: wave_color = C_GREEN
+                        elif "BINARY" in info: wave_color = C_CYAN
+                        elif "ASCII" in info: wave_color = C_YELLOW
+                        elif "Silence" in info: wave_color = C_RED
+                        else: wave_color = C_BLUE
+                    else: break
+                print_play_progress(elapsed, duration, get_real_wave_anim(self.samples, current_sample, 1), current_info, wave_color)
                 time.sleep(0.05)
-            print_play_progress(duration, duration, " " * 20)
-            print("\n\n [√] Playback finished.\n")
+            print_play_progress(duration, duration, " " * 20, "Playback Finished", C_RESET)
+            print(f"\n\n {C_GREEN}[√] Done.{C_RESET}\n")
         except KeyboardInterrupt:
-            process.terminate()
-            print("\n\n [!] Stopped.\n")
+            process.terminate(); print(f"\n\n {C_RED}[!] Interrupted.{C_RESET}\n")
         finally:
             try: os.unlink(temp_name)
             except: pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TSX to WAV converter and player")
-    parser.add_argument("input", help="Input TSX/TZX file")
-    parser.add_argument("output", nargs="?", help="Output WAV file (optional if using --play)")
-    parser.add_argument("--ls", action="store_true", help="List blocks and info")
-    parser.add_argument("--play", action="store_true", help="Play the audio directly")
-    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast loading")
-    parser.add_argument("--invert", action="store_true", help="Invert audio phase")
-    parser.add_argument("--extra-pause", type=int, default=0, help="Extra pause in ms")
-    parser.add_argument("--rate", type=int, default=96000, help="Sample rate")
+    parser.add_argument("input", help="Input TSX/TZX file"); parser.add_argument("output", nargs="?", help="Output WAV file")
+    parser.add_argument("--ls", action="store_true", help="List blocks and info"); parser.add_argument("--play", action="store_true", help="Play audio directly")
+    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast loading"); parser.add_argument("--invert", action="store_true", help="Invert phase")
+    parser.add_argument("--extra-pause", type=int, default=0, help="Extra pause in ms"); parser.add_argument("--rate", type=int, default=96000, help="Sample rate")
     args = parser.parse_args()
-
     converter = TSX2WAV(sample_rate=args.rate, fast=args.fast, invert=args.invert, extra_pause=args.extra_pause)
-    
-    if args.ls:
-        converter.list_blocks(args.input)
-    
+    if args.ls: converter.list_blocks(args.input)
     if args.output or args.play:
         converter.convert(args.input, args.output, silent=(args.play and not args.output))
-        if args.play:
-            converter.play()
-    elif not args.ls:
-        parser.print_help()
+        if args.play: converter.play()
+    elif not args.ls: parser.print_help()
