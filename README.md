@@ -1,24 +1,30 @@
 # MSXTOOLS
 
-Custom MSX development tools and scripts.
+Custom MSX development tools and scripts. This repository serves as a centralized "store" for high-quality, verified tools used in MSX game development.
 
-## C Tools
+## Project Structure
 
-- **Graphics:** sr52spr, sr52map, sr52pat, mt82map, sr52sms, sr52smsspr
-- **Packing/Cutting:** cutter, cuttersize, tar8k, tarbin, tarbinmax
-- **Disk/ROM:** dsktool, dskutils, sms2rom
-- **Misc:** extractwav, bgm2tmf, freepage, ViewSRC
+- `src/`: Source code for C/C++ utilities.
+- `scripts/`: Python 3, AWK, and TCL scripts for conversion and preprocessing.
+- `bin/`: (Generated) Compiled binaries.
+- `DOCS.md`: Detailed technical reference and usage instructions.
 
-## Scripts
+## Key Features
 
-Includes improved Python 3 versions of conversion and preprocessing tools:
-- `tsx2wav.py`
-- `playwav.py`
-- `Z80PRE-3.py` (Z80 Preprocessor)
-- `bintrozo-3.py` (Binary splitter)
-- `png2tms-map-3.py`
-- ... and more.
+- **Improved Python 3 Scripts**: Updated versions of standard MSX conversion tools (suffixed with `-3.py`).
+- **Unified Build System**: A single `Makefile` in the root builds all C tools and installs them to `bin/`.
+- **Verified Graphics Tools**: Specialized converters for Screen 1 (TMS9918), Screen 5, and Screen 8.
 
 ## Compilation
 
-Run `make` in the root directory to build all C tools.
+To build all C tools, simply run:
+
+```bash
+make
+```
+
+The binaries will be placed in the `bin/` directory.
+
+## Documentation
+
+For detailed usage information on each tool, please refer to [DOCS.md](./DOCS.md).
