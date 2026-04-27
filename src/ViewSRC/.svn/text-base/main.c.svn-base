@@ -1,0 +1,1279 @@
+
+/* Simple program:  Create a blank window, wait for keypress, quit.
+
+   Please see the SDL documentation for details on using the SDL API:
+   /Developer/Documentation/SDL/docs.html
+   */
+
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <ctype.h>
+#include "SDL.h"
+#include <stdarg.h>
+#include "AMOSLib.h"
+
+
+
+#define TSR5 1
+#define TSC5 2
+#define TGE5 3
+#define TSR6 4
+#define TSC6 5
+#define TSR7 6
+#define TSC7 7
+#define TSR8 8
+#define TSC8 9
+#define TSC0 10
+#define TSC1 11
+
+#define BYTE unsigned char
+
+BYTE pPalMode = 0;
+
+
+int ExtractMSXImageType (char *pExt)
+{
+
+
+    int Ttemp = 0;
+
+    if (strcmp ("SR5",pExt) == 0) 
+        Ttemp = TSR5;
+
+    if (strcmp ("SC5",pExt) == 0) 
+        Ttemp = TSC5;
+
+    if (strcmp ("GE5",pExt) == 0) 
+        Ttemp = TGE5;
+
+    if (strcmp ("SR6",pExt) == 0) 
+        Ttemp = TSR6;
+
+    if (strcmp ("SC6",pExt) == 0) 
+        Ttemp = TSC6;
+
+    if (strcmp ("SR7",pExt) == 0) 
+        Ttemp = TSR7;
+
+    if (strcmp ("SC7",pExt) == 0) 
+        Ttemp = TSC7;
+
+    if (strcmp ("SR8",pExt) == 0) 
+        Ttemp = TSR8;
+
+    if (strcmp ("SC8",pExt) == 0) 
+        Ttemp = TSC8;
+
+    if (strcmp ("SC0",pExt) == 0) 
+        Ttemp = TSC0;
+
+    if (strcmp ("SC1",pExt) == 0) 
+        Ttemp = TSC1;
+
+    return Ttemp;
+
+}    
+
+
+void ExtractWPath (char *pName, char *pNoPath) {
+
+    int i=0;
+    // Encontrar el final
+    while ( pName[i] != 0)
+        i++;
+
+
+
+    // Buscar el "/"
+
+
+
+    while ( (i>=0) && (( pName[i] != '/')  && (pName[i] != 0x5C)))
+        i--;
+
+    i++;
+    // Copiar el nombre
+    while ( pName[i] != 0)
+    {
+        *pNoPath++ = pName[i];
+        i++;
+    }
+    *pNoPath++ = 0;
+
+}     
+
+
+void ExtractExt (char *pName, char *pExt, char *pNameWExt) { 
+
+
+    int i = 0;
+    BYTE hext = 0;
+
+
+    if (pName) {
+
+        // Search end of array and "."
+
+        while ( pName[i] != 0) {
+
+            if (!hext) 
+                hext = (pName[i] == '.');
+            i++;
+        }
+
+
+
+        // Search .
+
+        if (hext) {
+
+            while ((i>=0) && ( pName[i] != '.'))
+                i--;        
+
+            // Copy ext        
+
+            strcpy (pNameWExt,pName);
+
+            pNameWExt[i+1] = 0; // End
+
+            while ( pName[i] != 0)
+            {
+                i++;
+                *pExt++ = toupper(pName[i]);
+
+            }
+
+
+        }
+
+    }
+
+}
+
+void MSXToRGB (BYTE *pScreenMSX, BYTE *pScreenMSX2, int *pImage, int *pPalette, int iSize, int imgType){
+
+
+
+    int i = 0;
+    iSize -= 7; // Header	
+
+
+    if ((imgType == TSR8) || (imgType == TSC8)) {
+
+        iSize = 256*212;
+
+        for (i = 0 ; i < iSize ;i++) {
+
+            pImage[i] = pPalette[pScreenMSX[i+7]];
+
+        } 
+
+        return;    
+    }                 
+
+    if ((imgType == TSR6) || (imgType == TSC6)) {
+        iSize = 128*212; 
+        for (i = 0; i< iSize ; i++) {
+
+            int b0,b1,b2,b3;
+
+            b0 = (pScreenMSX[i+7] & 0xC0) >> 6;
+            b1 = (pScreenMSX[i+7] & 0x30) >> 4;
+            b2 = (pScreenMSX[i+7] & 0x0C) >> 2;
+            b3 = (pScreenMSX[i+7] & 0x03);
+
+            *pImage++ = pPalette[b0];
+            *pImage++ = pPalette[b1];
+            *pImage++ = pPalette[b2];
+            *pImage++ = pPalette[b3];
+
+
+
+        }    
+
+        return;
+    }            
+
+
+    if ((imgType == TSC0) || (imgType == TSC1)) {
+
+
+        if (!pScreenMSX2) {
+            iSize = 256*212;
+        }                               
+        else {
+
+
+
+            int i2 = 0;
+            iSize = 256*212;            
+
+            for (i = 0 ; i < (iSize) ; i++) {
+
+
+                int iHighColor;
+                int iLowColor;
+
+                iHighColor = (pScreenMSX[i+7] & 0xF0) >> 4;
+                iLowColor = (pScreenMSX[i+7] & 0x0F);
+
+                pImage[i2*2] = pPalette[iHighColor];
+                pImage[(i2*2)+1] = pPalette[iLowColor];	
+                i2 ++;
+
+                if ((i2 & 0xFF) == 0) {
+                    i2 +=256;
+
+                }       
+
+            } 
+
+            i2 = 256;
+            for (i = 0 ; i < (iSize) ; i++) {
+
+
+                int iHighColor;
+                int iLowColor;
+
+                iHighColor = (pScreenMSX2[i+7] & 0xF0) >> 4;
+                iLowColor = (pScreenMSX2[i+7] & 0x0F);
+
+                pImage[i2*2] = pPalette[iHighColor];
+                pImage[(i2*2)+1] = pPalette[iLowColor];	
+                i2 ++;
+
+                if ((i2 & 0xFF) == 0) {
+                    i2 +=256;
+
+                }       
+
+            } 
+
+            return; 
+
+        }     
+
+    }                 
+
+
+    for (i = 0 ; i < iSize ;i++) {
+
+        int iHighColor;
+        int iLowColor;
+
+        iHighColor = (pScreenMSX[i+7] & 0xF0) >> 4;
+        iLowColor = (pScreenMSX[i+7] & 0x0F);
+
+        pImage[i*2] = pPalette[iHighColor];
+        pImage[(i*2)+1] = pPalette[iLowColor];	
+
+    } 
+
+
+
+}
+
+
+int MSXPal2TColor (BYTE RB, BYTE G){
+
+
+
+
+
+    int iR = (((RB >> 4  ) & 0x0F) << 5 ) <<16;
+    int iB = (((RB & 0x0F) << 5  ) );
+    int iG = (((G & 0x0F) << 5  ) ) << 8;
+
+
+
+    int iRGB =iR | iB | iG; 
+
+
+    return iRGB;
+
+
+}
+
+void InitSR8Pal (int *pPalette)
+{
+    // 256 colours
+    // MSX Format gggrrrbb
+
+    int i = 0;
+
+    for (i = 0; i < 256; i++) {
+
+        int R,G,B;
+
+        B = ((i & 3) << 1 | (i & 1)) << 5;
+        R = ((i & 0x1C) << (5-2)) << 16;
+        G = ((i & 0xE0) << 8);
+        pPalette[i] = R | G | B;
+
+    }         
+
+}
+
+void InitNormalPalR16 (int *pPalette, int iRang){
+
+    pPalette[iRang++]   = MSXPal2TColor(0x00,0x00);
+    pPalette[iRang++]   = MSXPal2TColor(0x00,0x00);
+    pPalette[iRang++]   = MSXPal2TColor(0x11,0x06);
+    pPalette[iRang++]   = MSXPal2TColor(0x33,0x07);
+    pPalette[iRang++]   = MSXPal2TColor(0x17,0x01);
+    pPalette[iRang++]   = MSXPal2TColor(0x27,0x03);
+    pPalette[iRang++]   = MSXPal2TColor(0x51,0x01);
+    pPalette[iRang++]   = MSXPal2TColor(0x27,0x06);
+    pPalette[iRang++]   = MSXPal2TColor(0x71,0x01);
+    pPalette[iRang++]   = MSXPal2TColor(0x73,0x03);
+    pPalette[iRang++]  = MSXPal2TColor(0x61,0x06);
+    pPalette[iRang++]  = MSXPal2TColor(0x64,0x06);
+    pPalette[iRang++]  = MSXPal2TColor(0x11,0x04);
+    pPalette[iRang++]  = MSXPal2TColor(0x65,0x02);
+    pPalette[iRang++]  = MSXPal2TColor(0x55,0x05);
+    pPalette[iRang++]  = MSXPal2TColor(0x77,0x07);
+
+}
+
+void InitNormalPal (int *pPalette){
+
+    int i = 0;
+    for (i = 0; i < 8 ; i++) {
+        InitNormalPalR16 (pPalette,i<<4);     
+    }
+
+}
+
+
+void InitMSXPal (int *pPalette, int imgType){
+
+
+    if ((imgType == TSR8) || (imgType == TSC8)) 
+    {
+        InitSR8Pal (pPalette);    // Inicializaremos Screen 8             
+    }
+    else
+    {
+        InitNormalPal(pPalette);
+    }
+
+
+}
+
+void ZoomAll ( float fTexelsU, float fTexelsV, int *pTexture, int iImgWidth , int iImgHeight)
+{
+
+    int iWidth = GetScreenWidth  ();   // Width de la pantalla  grafica
+    int iHeight = GetScreenHeight();   // Height de la pantalla grafica	
+    int *pPixels = (int *) GetScreenPixels (); // Puntero a la pantalla grafica
+
+    if (fTexelsU == 0) 
+        fTexelsU = 1.0f;
+    if (fTexelsV == 0) 
+        fTexelsV = 1.0f;
+
+
+
+    float fStepU = (fTexelsU / iWidth);    
+    float fStepV = (fTexelsV / iHeight);    
+
+    int iLImgWidth = iImgWidth - 1;
+
+
+
+
+    int x,y; // Variables para recorrer toda la pantalla 
+    int fxSU = (int)(fStepU * 65536.0f); // Transformamos el paso a entero
+    int fxSV = (int)(fStepV * 65536.0f); // Transformamos el paso a entero	
+
+    int fxV = 0; // Acumulador  Vertical para recorrer la textura segun el paso	
+
+    for (y = 0 ; y < iHeight ; y ++) 
+    {
+        int fxU = 0; // Acumulador Horizontal para recorrer la textura segun el paso	       
+        int *pLine = &pPixels [(y * iWidth)];   // Optimizamos : Esto no cambia en toda la linea    
+
+        int *pTexLine = &pTexture [ ((fxV>>16) & iLImgWidth) * iImgWidth ]; // Esto tampoco
+
+        for (x = 0 ; x < iWidth ; x ++ )
+        {
+            pLine[x] = pTexLine [(fxU>>16 ) & iLImgWidth ];                      
+            fxU += fxSU; // Incrementamos a la siguiente U de la textura a pintar
+        }        
+        fxV += fxSV;   
+    }
+
+
+
+}
+
+
+void ZoomCenter ( float fZoom, int *pTexture, int iImgWidth , int iImgHeight, char Scanlines)
+{
+    if (fZoom == 0) 
+        fZoom = 1; 
+    float fStep = (float) (1 / fZoom);
+
+    int iLImgWidth = iImgWidth - 1;
+
+
+
+    // Check Scanlines
+
+    if (Scanlines) {
+        iImgHeight *=2;  
+    }
+
+
+
+    int iWidth = GetScreenWidth  ();   // Width de la pantalla  grafica
+    int iHeight = GetScreenHeight();   // Height de la pantalla grafica	
+    int *pPixels = (int *) GetScreenPixels (); // Puntero a la pantalla grafica
+
+   
+
+
+    int iSizeX = (int) (fZoom * iImgWidth) ; //Tamaño final de la textura en pantalla
+    int iSizeY = (int) (fZoom * iImgHeight) ;
+
+    int xInit = (iWidth - iSizeX) / 2 ; //x de Comienzo
+    int yInit = (iHeight - iSizeY) /2 ; //y de Comienzo
+
+
+
+    int x,y; // Variables para recorrer toda la pantalla 
+    int fxS = (int)(fStep * 65536.0f); // Transformamos el paso a entero
+
+    int fxV = 0; // Acumulador  Vertical para recorrer la textura segun el paso	
+
+
+
+
+
+    for (y = 0 ; y < iHeight ; y ++) 
+    {
+        int fxU = 0; // Acumulador Horizontal para recorrer la textura segun el paso	       
+        int *pLine = &pPixels [(y * iWidth)];   // Optimizamos : Esto no cambia en toda la linea    
+        int *pTexLine = &pTexture [ ((fxV>>16) & iLImgWidth) * iImgWidth ]; // Esto tampoco
+
+
+        if (!Scanlines) {
+            if ((y >= yInit) && ( (y - yInit) < iSizeY)) {
+
+                for (x = 0 ; x < iWidth ; x ++ )
+                {
+
+                    if ((x >= xInit)  && ((x -xInit) < iSizeX) ){
+
+                        pLine[x] = pTexLine [(fxU>>16 ) & iLImgWidth ];                    
+                        fxU += fxS; // Incrementamos a la siguiente U de la textura a pintar                        
+                    }
+
+
+                }        
+                fxV += fxS;                 
+            }
+
+
+        }                        
+        else
+        {
+            if (y & 1) {
+                if ((y >= yInit) && ( (y - yInit) < iSizeY)) {
+
+                    for (x = 0 ; x < iWidth ; x ++ )
+                    {
+
+                        if ((x >= xInit)  && ((x -xInit) < iSizeX) ){
+
+                            pLine[x] = pTexLine [(fxU>>16 ) & iLImgWidth ];                    
+                            fxU += fxS; // Incrementamos a la siguiente U de la textura a pintar                        
+                        }
+
+
+                    }        
+                    fxV += fxS;                 
+                }
+
+
+            }
+            else
+            {
+                if ((y >= yInit) && ( (y - yInit) < iSizeY))
+                {
+                    for (x = 0 ; x < iWidth ; x ++ )
+                    {
+
+                        if ((x >= xInit)  && ((x -xInit) < iSizeX) ){
+
+                            pLine[x] = 0;
+                        }
+
+
+                    }        
+                }
+
+            } 
+
+
+
+        }            
+
+
+
+
+
+
+    }
+
+}
+
+void GetMSXImgSizes (int imgType,int *imgWidth, int *imgHeight) {
+
+    if ((imgType == TSR5) ||
+            (imgType == TSC5) ||
+            (imgType == TGE5) ||
+            (imgType == TSR8) ||
+            (imgType == TSC8)) {
+
+        *imgWidth = 256;
+        *imgHeight = 212;                  
+    }                  
+
+    if ((imgType == TSR7) || (imgType == TSC7) ||
+            (imgType == TSC6) || (imgType == TSR6))
+    {    
+        *imgWidth = 512;
+        *imgHeight = 212;                 
+    }                 
+
+    if ((imgType == TSC0) || (imgType == TSC1)) {
+
+        *imgWidth = 512;
+        *imgHeight = 424;                      
+
+    }                            
+
+}     
+
+
+void ShowImage (int *pImage,int imgType, float fZoom, char AllScreen, char ScanLines,int imgWidth, int imgHeight){
+
+
+    /*	int imgWidth = 0;
+        int imgHeight = 0;
+        GetMSXImgSizes (imgType,&imgWidth,&imgHeight);     
+        */
+
+    if (AllScreen) {
+
+        ZoomAll (imgWidth,imgHeight,pImage,imgWidth,imgHeight);                 
+    }                 
+    else {
+
+        ZoomCenter  (fZoom,pImage,imgWidth,imgHeight,ScanLines);
+    }          
+
+
+
+}
+
+
+
+void LoadPalFile (BYTE *pImageFile, int *pPalette, int iSize) {
+
+    int i = 0;
+    for (i = 0 ; i < (iSize>>1) ; i ++) {
+
+        BYTE RB = 0;
+        BYTE G = 0;
+        RB = pImageFile [i*2];
+        G = pImageFile [(i*2)+1];
+        pPalette [i] = MSXPal2TColor (RB,G);
+
+    }
+
+}     
+
+void GetSCXPal (char *pName, int *pPalette, int imgType) {
+
+    BYTE *pPalFile = NULL;
+
+    pPalFile = (BYTE *) BinLoad (pName);
+
+    if (pPalFile) {
+        int p2Pal = 0;
+        int read = 0;
+
+
+
+        if ((imgType == TGE5) ||
+                (imgType == TSC5) ||
+                (imgType == TSC6))
+        {
+            p2Pal = 0x7680 + 7;                     
+        }                                             
+
+        if ((imgType == TSC7) || (imgType == TSC0) || (imgType == TSC1)){
+
+            p2Pal = 0xFA80 + 7;                     
+        }                                             
+
+        if (GetFileSize (pName) < p2Pal) {
+            return;
+        }                        
+
+
+        LoadPalFile (&pPalFile[p2Pal],pPalette,32);
+
+
+    }                   
+
+}     
+
+
+void GetSRXPal (char *pNameWExt,int *pPalette, char *pPalExt) {
+
+    char *pPalFile = NULL;
+    pPalFile = (char *) malloc (strlen(pNameWExt) + 4);
+    if (pPalFile) {
+
+        strcpy (pPalFile,pNameWExt);
+        strcat (pPalFile,pPalExt);
+        if (FileExist (pPalFile)) {
+
+            int iSize = 0;
+            iSize = GetFileSize (pPalFile);
+
+            if (iSize) {
+                BYTE *pImagePal = NULL;                 
+                pImagePal = (BYTE*) BinLoad (pPalFile);
+                LoadPalFile (pImagePal,pPalette,iSize);
+            }
+        }
+
+        free (pPalFile);     
+    }
+
+}     
+
+void SearchPalFile (char *pName, char *pName2, char *pNameWExt, int *pPalette, int imgType) {
+
+
+    InitMSXPal (&pPalette[0],imgType);
+    switch (imgType) {
+
+        case TSR5:
+            GetSRXPal(pNameWExt,pPalette,"PL5");
+            GetSRXPal(pNameWExt,pPalette,"Pl5");
+            GetSRXPal(pNameWExt,pPalette,"pL5");                                          
+            GetSRXPal(pNameWExt,pPalette,"pl5");  
+            break;                   
+
+        case TGE5:                               
+            GetSCXPal(pName,pPalette,imgType);
+            break;
+
+        case TSC5:                               
+            GetSCXPal(pName,pPalette,imgType);
+            break;
+
+        case TSR6:
+            GetSRXPal(pNameWExt,pPalette,"PL6");
+            GetSRXPal(pNameWExt,pPalette,"Pl6");
+            GetSRXPal(pNameWExt,pPalette,"pL6");                                          
+            GetSRXPal(pNameWExt,pPalette,"pl6");
+            break;  
+
+        case TSC6:
+            GetSCXPal(pName,pPalette,imgType);	
+            break;
+
+        case TSR7:
+            GetSRXPal(pNameWExt,pPalette,"PL7");
+            GetSRXPal(pNameWExt,pPalette,"Pl7");
+            GetSRXPal(pNameWExt,pPalette,"pL7");                                          
+            GetSRXPal(pNameWExt,pPalette,"pl7");  
+            break;                   
+
+
+
+
+        case TSC7:                               
+            GetSCXPal(pName,pPalette,imgType);
+            break;
+
+
+        case TSC0:                               
+            GetSCXPal(pName,pPalette,imgType);
+            break;
+
+        case TSC1:                               
+            GetSCXPal(pName2,pPalette,imgType);
+            break;
+
+
+
+
+
+    }
+
+}
+
+void ShowImageMSX (int *pImage, BYTE *pScreenMSX, BYTE *pScreenMSX2, int *pPalette, int imgType, char AllScreen, int iNPal, float fZoom, int iSize, char ScanLines, int imgWidth, int imgHeight) {
+
+    int i = 0;   
+    i = (iNPal <<4);
+
+    MSXToRGB(pScreenMSX,pScreenMSX2,pImage,&pPalette[i],iSize,imgType);
+
+
+    ShowImage (pImage,imgType,fZoom,AllScreen,ScanLines,imgWidth,imgHeight);
+
+
+}     
+
+void SaveScreenPBM	 (char *pNameWExt, int *pImage, int iSW, int iSH)
+{
+
+
+
+
+    ScreenOpenNum (2,iSW,iSH,RGB888);
+    int *pPixels = (int *) GetScreenPixelsNum (2);	
+    int i;
+
+    for (i = 0; i< (iSW*iSH) ; i++)
+        *pPixels++ = *pImage++;
+
+    Screen(2);
+    char *pNameNewExt = NULL;
+
+    pNameNewExt = (char*) malloc (strlen(pNameWExt));
+    strcpy (pNameNewExt,pNameWExt);
+    strcat(pNameNewExt,"PBM");
+    SavePBM (pNameNewExt);
+    free (pNameNewExt);
+    ScreenCloseNum (2);
+    Screen(0);
+
+}
+
+void SaveScreenBMP(char *pNameWExt, int *pImage, int iSW, int iSH) 
+{
+    SDL_Surface *surface;
+    Uint32 rmask, gmask, bmask, amask;
+
+
+    rmask = 0x00000000;
+    gmask = 0x00000000;
+    bmask = 0x00000000;
+    amask = 0x00000000;
+
+
+    surface = SDL_CreateRGBSurface(SDL_SWSURFACE, iSW, iSH, 32,
+            rmask, gmask, bmask, amask);
+
+
+    int *pPixels = (int*) surface -> pixels;
+
+    int i =0;
+
+    for (i = 0; i< (iSW*iSH) ; i++)
+        *pPixels++ = *pImage++;
+
+    char *pNameNewExt = NULL;
+    pNameNewExt = (char*) malloc (strlen(pNameWExt));
+    strcpy (pNameNewExt,pNameWExt);
+    strcat(pNameNewExt,"BMP");
+
+    SDL_SaveBMP (surface,pNameNewExt);
+
+    SDL_FreeSurface (surface);
+    free (pNameNewExt);
+
+
+}
+
+void ChangePalFormat (int *pPalette, int *pPaletteSave, int iFormat){
+
+    int i,R,G,B;
+    int aConst [] = {0,36,73,109,146,182,218,255};
+
+
+    switch (iFormat) {
+
+        case 0: // Normal Palette
+            memcpy (pPalette,pPaletteSave,sizeof(int)*256);
+            break;
+
+        case 1: // + Bright
+            for (i = 0 ; i< 256 ; i++) {
+
+                R = (pPaletteSave[i] & 0xFF0000) >> (16+5);
+                G = (pPaletteSave[i] & 0x00FF000) >> (8+5);
+                B = (pPaletteSave[i] & 0xFF) >> 5;
+
+                R = (R | (R << 5)) << 16;
+                G = (G | (G << 5)) << 8;
+                B = (B | (B << 5));
+                *pPalette++ = R | G | B;
+
+
+            }
+
+            break;
+
+        case 2: // media
+
+            for (i = 0; i < 256 ; i ++) {
+                R = (pPaletteSave[i] & 0xFF0000) >> (16+5);
+                G = (pPaletteSave[i] & 0x00FF000) >> (8+5);
+                B = (pPaletteSave[i] & 0xFF) >> 5;
+
+                R = (aConst [R] << 16) & 0xFF0000;
+                G = (aConst [G] << 8) & 0xFF00;
+                B = (aConst [B]) & 0xFF;
+
+                *pPalette++ = R | G | B;
+
+
+            }
+            break;
+    }
+
+
+}
+
+
+void FillColour (void){
+
+    int *pPixels = (int*) GetScreenPixels();
+    int iWidth = GetScreenWidth();
+    int iHeight = GetScreenHeight();
+
+    int x,y = 0;
+
+    int colour0 = 0x777777;
+    int colour1 = 0x0;
+    int swapline = 0;
+    int swapraster = 0;
+
+    for (y = 0 ; y < iHeight ; y++) {
+        if ((y & 7) == 0)
+            swapraster ^=1;
+
+        for (x = 0 ; x < iWidth ; x++ ){
+
+            if ((x & 7) == 0)
+                swapraster ^=1;
+
+            if (swapraster) {
+
+                *pPixels++ = colour1;                
+            }                       
+            else
+            {
+                *pPixels++ = colour0;
+            }              
+
+
+
+        }
+
+    }         
+
+
+
+
+}     
+
+// ---------------------------------------------------------------------------
+
+
+
+
+int main (int argc, char *argv[])
+{
+
+
+    if (argc < 2) {
+        printf ("Please use Image File in arguments....\n");
+        return 1;         
+    }
+
+
+    char *pNameFile = NULL;   
+    char *pNameFileExt = NULL;
+    char *pNameFileWExt = NULL;
+    char *pNameFileWPath = NULL;
+    char *pNameFile2 = NULL;
+
+    pNameFile = (char *) malloc (strlen(argv[1]));
+
+    pNameFile2 = (char *) malloc (strlen(argv[1])); // For iSR7
+
+    pNameFileWExt = (char *) malloc (strlen(argv[1]));
+    pNameFileWPath = (char *) malloc (strlen(argv[1]));
+
+    pNameFileExt = (char *) malloc (strlen(argv[1]));
+
+
+
+    if ((!pNameFileExt) || (!pNameFile) || (!pNameFileWExt) || (!pNameFileWPath) || (!pNameFile2)) {
+        printf ("Problems with memory reserve...\n");
+        return 2;                     
+    }
+
+
+    // Get Name Full
+
+    strcpy (pNameFile,argv[1]);
+
+    // Get Ext and Name With Ext
+
+
+    ExtractWPath (pNameFile,pNameFileWPath);
+    ExtractExt (pNameFile,pNameFileExt,pNameFileWExt);
+
+
+
+
+    // Extract Image Type
+
+    int ImgType;
+
+    ImgType = ExtractMSXImageType(pNameFileExt);
+
+    strcpy (pNameFile2,pNameFileWExt);
+
+    if (ImgType == TSC0) {
+
+        strcat (pNameFile2,"SC1");
+    }                
+
+    if (ImgType == TSC1) {
+
+        strcat (pNameFile2,"SC0");
+    }                
+
+
+
+
+    if (!ImgType) {
+        printf ("Image type invalid\n");
+        return 3;
+    }
+
+
+
+    AMOSLibInit ();
+
+    // Check file 
+
+
+
+    ScreenOpen (640,480,RGB888);
+
+    SDL_WM_SetCaption("ViewSRC v.0.1 View MSX SRC Files",NULL);
+
+
+
+
+    if (!FileExist(pNameFile)){
+
+        printf ("Sorry, file not found... \n");
+        return 4;
+    }
+
+
+
+    int pPalette[256];
+    int pPaletteSave [256];
+
+    SearchPalFile (pNameFile,pNameFile2,pNameFileWExt,pPalette,ImgType);
+
+    // Copy Palette to Palette Save
+
+    memcpy (pPaletteSave,pPalette,sizeof(int)*256);
+
+
+
+    BYTE *pScreenMSX = NULL;
+    BYTE *pScreenMSX2 = NULL;
+
+
+    int iSize;	
+    iSize = GetFileSize (pNameFile);  
+
+    if ((ImgType == TSC0) || (ImgType == TSC1)) {
+
+        if (ImgType == TSC0) {
+            pScreenMSX = (BYTE*) BinLoad (pNameFile);
+
+            if (!pScreenMSX) {
+                printf ("Problems reading file... \n");
+                return 5;
+            }
+
+            pScreenMSX2 = (BYTE*) BinLoad (pNameFile2);
+
+
+        }            
+
+
+        if (ImgType == TSC1) {
+            pScreenMSX2 = (BYTE*) BinLoad (pNameFile);
+
+            if (!pScreenMSX2) {
+                printf ("Problems reading file... \n");
+                return 5;
+            }
+
+            pScreenMSX = (BYTE*) BinLoad (pNameFile2);
+            if (!pScreenMSX) {
+
+                pScreenMSX = pScreenMSX2;
+                pScreenMSX2 = NULL;
+            }                 
+
+        }            
+
+    }                 
+    else
+    {
+
+        pScreenMSX = (BYTE*) BinLoad (pNameFile);
+
+        if (!pScreenMSX) {
+            printf ("Problems reading file... \n");
+            return 5;
+        }
+
+    } 
+
+
+
+    int imgWidth = 0;
+    int imgHeight = 0;
+
+
+    GetMSXImgSizes (ImgType,&imgWidth,&imgHeight);
+
+    if ((ImgType == TSC0) || (ImgType == TSC1)) {
+
+        if (!pScreenMSX2) {
+
+            imgHeight = 212;
+            iSize = 256*212;
+        }                         
+
+    }                 
+
+
+
+    int *pImage = NULL;
+
+    pImage = (int *) malloc(sizeof(int) * (iSize*4));
+
+    if (!pImage) {
+        printf("Problems with memory reserve \n");
+        return 6;
+    }
+
+
+
+    float fZoom = 1;
+    char AllScreen = 0;
+    int iNPal = 0;
+    char ScanLines = 0;
+
+
+
+    char repaint = 1;
+    char ShowInfo = 1;
+
+    char checkKeyS,checkKeyC,checkKeyLeft,checkKeyRight,checkKeyUp,checkKeyDown,checkKeyI;
+
+    char checkKeyB,checkKey1,checkKey2,checkKey3;
+    int iFormat = 2;
+    int exitApp = 0; 
+
+
+    do
+    { 
+
+        SDL_Flip (SDL_GetVideoSurface());
+
+
+
+        if (repaint) {
+
+            Cls (0);
+            FillColour();			
+            if ((ImgType == TSC8) || (ImgType == TSR8)) {
+                iNPal = 0;
+            }      
+            ChangePalFormat(pPalette,pPaletteSave,iFormat);
+
+
+            ShowImageMSX (pImage,pScreenMSX,pScreenMSX2,pPalette,ImgType,AllScreen,iNPal,fZoom,iSize,ScanLines,imgWidth,imgHeight);                   
+
+
+
+            if (ShowInfo) {
+                Locate (0,0);
+                Print ("Image File: %s \n",pNameFileWPath);   
+                Print ("Pal Number: %i \n",iNPal);  
+                char pScanLines[3];
+                if (ScanLines) {
+                    strcpy (pScanLines,"ON");                              
+                } 
+                else
+                {
+                    strcpy (pScanLines,"OFF");                                                
+                }                            
+
+                Print ("ScanLines : %s \n",pScanLines);
+                Print ("Zoom: %f\n",fZoom);
+                Print ("Pal Format: %i \n",iFormat); 
+                Print ("ImgWidth: %i\n",imgWidth);
+                Print ("ImgHeight: %i\n",imgHeight);				
+            }
+
+
+
+
+            ScreenSwap();                      
+            repaint = 0;           
+        }                                        
+
+
+        exitApp = 0;
+
+        SDL_Event event;
+        SDL_WaitEvent( &event );
+
+        if (event.type == SDL_QUIT) {
+            exitApp = 1;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+
+            checkKey1 = event.key.keysym.sym == SDLK_1;
+
+            checkKey2 = event.key.keysym.sym == SDLK_2;
+
+            checkKey3 = event.key.keysym.sym == SDLK_3;
+
+            checkKeyB = event.key.keysym.sym == SDLK_b;
+
+            checkKeyI = event.key.keysym.sym == SDLK_i;
+
+
+            checkKeyS = event.key.keysym.sym == SDLK_s;
+
+            checkKeyC = event.key.keysym.sym == SDLK_c;        
+
+            checkKeyUp = event.key.keysym.sym == SDLK_UP;        
+
+            checkKeyDown = event.key.keysym.sym == SDLK_DOWN;        
+
+            checkKeyLeft = event.key.keysym.sym == SDLK_LEFT;        
+
+            checkKeyRight = event.key.keysym.sym == SDLK_RIGHT;        
+
+
+
+
+            if (checkKey1) {
+                iFormat = 0;
+                repaint = 1;
+            }
+
+            if (checkKey2) {
+                iFormat = 1;
+                repaint = 1;
+            }		
+
+            if (checkKey3) {
+                iFormat = 2;
+                repaint = 1;
+            }
+
+            if (checkKeyS){ 
+                ScanLines ^=1;
+                repaint = 1;
+
+            }                                              
+
+            if (checkKeyC) {
+                AllScreen ^=1;
+                repaint = 1;                        
+            }                        
+
+
+            if (checkKeyLeft) {
+                iNPal = (iNPal -1) & 7;  
+                repaint = 1;                        
+            }                         
+
+            if (checkKeyRight) {
+                iNPal = (iNPal +1) & 7;                          
+                repaint = 1;
+            }                         
+
+
+            if (checkKeyI) {
+
+                ShowInfo ^= 1;            
+                repaint = 1;
+            }                      
+
+            if (checkKeyUp) {
+                fZoom *=2;
+                repaint = 1;                       
+            }                       
+
+
+            if (checkKeyDown) {
+                if (fZoom) {
+                    fZoom /=2;
+                }
+                repaint = 1;                       
+            }                       
+
+            if (checkKeyB) {
+                SaveScreenBMP (pNameFileWExt,pImage,imgWidth,imgHeight);
+            }
+
+
+            if ( (event.key.keysym.sym == SDLK_ESCAPE) || (event.key.keysym.sym == SDLK_q))
+                exitApp = 1;
+        }
+
+
+
+
+    } while (!exitApp);            
+
+    // Free Mem
+
+    free (pImage);
+    free (pNameFileWExt);
+    free (pNameFileExt);
+    free (pNameFile2);
+    free (pNameFileWPath);
+    free (pNameFile);
+
+    AMOSLibEnd  ();
+    return 0;
+
+
+}
+
+
+

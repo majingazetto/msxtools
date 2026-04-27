@@ -1,0 +1,336 @@
+/*
+ *  Screens.c
+ *  AMOSLib
+ *
+ *  Created by Luis Pons on Sun Nov 24 2002.
+ *  Copyright (c) 2002 . All rights reserved.
+ *
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <AMOSLib.h>
+
+#include "Memory.h"
+#include "Sys.h"
+#include "ColorSpaceConv.h"
+#include "ScreenDump.h"
+#include "Screens.h"
+
+// Defines
+// ----------------------------------------------------------------------------
+
+typedef struct
+{
+    int  blOpen;
+    void *pAddress;
+    int  wWidth;
+    int  wHeight;
+    int  wTags;
+} SCREEN;
+
+void MakePixelTables ( int wTags);
+void MakeTableHSL637 ();
+
+
+// Globales
+// ----------------------------------------------------------------------------
+
+static unsigned long *g_pTableHSL637 = NULL;
+static int            g_wCurrentScreen = 0;
+static int            g_wOutputMode = OUT_NO;
+static SCREEN         g_Screen [ MAX_SCREENS];
+
+// ----------------------------------------------------------------------------
+
+void ScreenInit ()
+{
+    int i;
+    int wReqWidth  = 640;
+    int wReqHeight = 480;
+    
+    for ( i=0; i<MAX_SCREENS; i++)
+        g_Screen [ i].blOpen = 0;
+        
+    // Default screen
+
+    g_wOutputMode = OUT_NO;
+
+    if ( g_wOutputMode == OUT_NO)
+        if ( SysScreenOpenRGB888 ( wReqWidth, wReqHeight))
+            g_wOutputMode = OUT_RGB888;
+
+    if ( g_wOutputMode == OUT_NO)
+        if ( SysScreenOpenRGB555 ( wReqWidth, wReqHeight))
+            g_wOutputMode = OUT_RGB555;
+    
+    if ( g_wOutputMode == OUT_NO)
+        if ( SysScreenOpenRGB565 ( wReqWidth, wReqHeight))
+            g_wOutputMode = OUT_RGB565;
+
+    if ( g_wOutputMode == OUT_NO)
+    {
+        printf ("Couldn't open screen\n");
+    }
+
+    ScreenOpen  ( wReqWidth, wReqHeight, RGB555);
+}
+
+// ----------------------------------------------------------------------------
+
+int  ScreenOpen  ( int wWidth, int wHeight, int wTags)
+{
+    return ScreenOpenNum ( g_wCurrentScreen, wWidth, wHeight, wTags);
+}
+
+int  ScreenOpenNext  ( int wWidth, int wHeight, int wTags)
+{
+    int i = 0;
+    while ((i<MAX_SCREENS) && ( g_Screen [ i].blOpen == 1))
+        i++;
+
+    if ( ScreenOpenNum ( i, wWidth, wHeight, wTags) != 0)
+        return i;
+    else
+        return 0;
+}
+
+// ----------------------------------------------------------------------------
+
+int ScreenOpenNum ( int wNum, int wWidth, int wHeight, int wTags)
+{
+    int wSize;
+
+    if (( wNum >= MAX_SCREENS) || ( wNum < 0))
+    {
+        printf ( "Numero de pantallas excedido\n");
+        return 0;
+    }
+    
+    if ( g_Screen [ wNum].blOpen == 1)
+        ScreenCloseNum ( wNum);
+    
+    if (( wWidth & 0x3) != 0)
+    {
+        printf ( "Ancho invalido (%d), debe ser multiplo de 4\n", wWidth);
+        return 0;
+    }
+
+    MakePixelTables ( wTags & COLOR_MODE_MASK);
+
+    wSize = wWidth * wHeight * GetColorModePixelSize ( wTags & COLOR_MODE_MASK);
+    g_Screen [ wNum].wWidth   = wWidth;
+    g_Screen [ wNum].wHeight  = wHeight;
+    g_Screen [ wNum].wTags    = wTags;
+	g_Screen [ wNum].pAddress = ReserveAsFast ( wSize,
+                                                "ScreenOpen function\n", 
+                                                DEFAULT_ALIGN, 
+                                                DEFAULT_PREFETCH);
+
+    g_Screen [ wNum].blOpen = 1;
+    g_wCurrentScreen = wNum;
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+
+void  ScreenClose  ()
+{
+    ScreenCloseNum ( g_wCurrentScreen);
+}
+
+void  ScreenCloseNum ( int wNum)
+{
+    if ( g_Screen [ wNum].blOpen == 1)
+    {
+        // Find a valid screen ( if any)
+        int i = 0;
+        while ((i < MAX_SCREENS) && ( g_Screen [ i].blOpen == 0))
+            i++;
+        if (i < MAX_SCREENS)
+            g_wCurrentScreen = i;
+
+        g_Screen [ wNum].blOpen = 0;
+        Free ( g_Screen [ wNum].pAddress);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+void ScreenSwap  ()
+{
+    int   wWidth, wHeight;
+    void *pPixels;
+    SCREENDUMP_ARGS Args;
+
+    if ( g_Screen [ g_wCurrentScreen].blOpen == 0)
+        return;
+
+    SysGetScreenInfoAndLock ( &wWidth, &wHeight, &pPixels);
+
+    Args.pSrcAddress   = g_Screen [ g_wCurrentScreen].pAddress;
+    Args.wSrcWidth     = g_Screen [ g_wCurrentScreen].wWidth;
+    Args.wSrcHeight    = g_Screen [ g_wCurrentScreen].wHeight;
+    Args.wSrcTags      = g_Screen [ g_wCurrentScreen].wTags;
+    Args.pDstAddress   = pPixels;
+    Args.wDstWidth     = wWidth;
+    Args.wDstHeight    = wHeight;
+    Args.wDstColorMode = g_wOutputMode; 
+    ScreenDump ( &Args);
+
+    SysFlipScreenAndUnlock  ();
+}
+
+// ----------------------------------------------------------------------------
+
+void  ScreenCopy  ( int wNumSrc, int wNumDst)
+{
+    int wWidth, wHeight, wColorSrc, wColorDst, wModuloSrc, wModuloDst;
+    int y;
+    intptr_t pSrc, pDst;
+
+    if ( g_Screen [ wNumSrc].blOpen == 0)
+    {
+        printf ( "Can't copy screen %d, it doesn't exist\n", wNumSrc);
+        return;
+    }
+    if ( g_Screen [ wNumDst].blOpen == 0)
+    {
+        ScreenOpenNum ( wNumDst, 
+                        g_Screen [ wNumSrc].wWidth, 
+                        g_Screen [ wNumSrc].wHeight, 
+                        g_Screen [ wNumSrc].wTags);
+    }
+
+    wWidth = g_Screen [ wNumSrc].wWidth;
+    if ( g_Screen [ wNumSrc].wWidth > g_Screen [ wNumDst].wWidth)
+        wWidth = g_Screen [ wNumDst].wWidth;
+    wHeight = g_Screen [ wNumSrc].wHeight;
+    if ( g_Screen [ wNumSrc].wHeight > g_Screen [ wNumDst].wHeight)
+        wHeight = g_Screen [ wNumDst].wHeight;
+
+    wColorSrc  = g_Screen [ wNumSrc].wTags & COLOR_MODE_MASK;
+    wColorDst  = g_Screen [ wNumDst].wTags & COLOR_MODE_MASK;
+    wModuloSrc = g_Screen [ wNumSrc].wWidth * GetColorModePixelSize ( wColorSrc);
+    wModuloDst = g_Screen [ wNumDst].wWidth * GetColorModePixelSize ( wColorDst);
+    pSrc       = (intptr_t) g_Screen [ wNumSrc].pAddress;
+    pDst       = (intptr_t) g_Screen [ wNumDst].pAddress;
+    for ( y=0; y< wHeight; y++)
+    {
+        ColorTransform ( (void *)pSrc, g_Screen [ wNumSrc].wTags & COLOR_MODE_MASK,
+                         (void *)pDst, g_Screen [ wNumDst].wTags & COLOR_MODE_MASK,
+                         wWidth);
+        pSrc += wModuloSrc;
+        pDst += wModuloDst;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+void  Screen ( int wNum)
+{
+    g_wCurrentScreen = wNum;
+}
+
+int  GetScreen  ()
+{
+    return g_wCurrentScreen;
+}
+
+int  GetScreenWidth  ()
+{
+    if ( g_Screen [ g_wCurrentScreen].blOpen == 0)
+        return 0;
+    return g_Screen [ g_wCurrentScreen].wWidth;
+}
+
+int  GetScreenHeight ()
+{
+    if ( g_Screen [ g_wCurrentScreen].blOpen == 0)
+        return 0;
+    return g_Screen [ g_wCurrentScreen].wHeight;
+}
+
+void *GetScreenPixelsNum  ( int wNum)
+{
+    if ( g_Screen [ wNum].blOpen == 0)
+        return 0;
+    return g_Screen [ wNum].pAddress;
+}
+
+void *GetScreenPixels  ()
+{
+    return GetScreenPixelsNum ( g_wCurrentScreen);
+}
+
+int  GetScreenPixelSize ()
+{
+    int wColorMode = g_Screen [ g_wCurrentScreen].wTags & COLOR_MODE_MASK;
+    return GetColorModePixelSize ( wColorMode);
+}
+
+// ----------------------------------------------------------------------------
+
+void MakePixelTables ( int wTags)
+{
+    wTags = wTags & 0x3;
+    switch ( wTags)
+    {
+        case HSL637:
+        {
+            if ( g_pTableHSL637 != NULL)
+                MakeTableHSL637 ();
+        }
+        break;
+        
+        //case YUV754:
+	}
+}
+
+// ----------------------------------------------------------------------------
+
+static int Clamp8 ( int w8)
+{
+    if ( w8 < 0)
+        return 0;
+    if ( w8 > 255)
+        return 255;
+    return w8;
+}
+
+// ----------------------------------------------------------------------------
+
+void MakeTableHSL637 ()
+{
+    int    h,s,l;
+    float  hls [3];
+    unsigned long *pTab;
+    
+    g_pTableHSL637 = ( unsigned long *) ReserveAsFast ( sizeof(long) * 0x10000,
+                                     "MakeTableHSL637 function\n",
+                                     DEFAULT_ALIGN, DEFAULT_PREFETCH);
+    pTab = g_pTableHSL637;
+    for ( h=0; h<64; h++)
+    {
+        hls[0] = (float)h / 63.0;
+        for ( s=0; s<4; s++)
+        {
+            hls[2] = (float)s / 15.0;
+            for ( l=0; l<64; l++)
+            {
+                float rgb [3];
+                int   r,g,b;
+                hls[1] = (float)l / 63.0;
+
+                HLS2RGB ( hls, rgb);
+
+                r = Clamp8 ((int)(rgb[0] * 255.0));
+                g = Clamp8 ((int)(rgb[1] * 255.0));
+                b = Clamp8 ((int)(rgb[2] * 255.0));
+
+                *pTab++ = (r<<16) | (g<<8) | b;
+            }
+        }
+    }
+}

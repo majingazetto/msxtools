@@ -1,0 +1,743 @@
+; *******************************************************************
+; Test of SMS sprite and tile data
+; *******************************************************************
+
+
+; System Vars and BIOS routs.
+
+RG0SAV:         equ     0F3DFh
+HKEYI:          equ     0FD9Ah
+HTIMI:          equ     0FD9Fh
+JIFFY:          equ     0FC9Eh
+CHGMOD:         equ     05Fh
+EXPTBL:         equ     0FCC1h
+ENASLT:         equ     24h
+
+; Franky Ports
+
+FVDP88:         equ     088h    ; Franky Data VDP Port
+FVDP89:         equ     089h    ; Franky Control VDP Port
+FPSGVC:         equ     048h    ; Vertical reg (vdp) / PSG write
+FPSGHC:         equ     049h    ; Hor. reg (vdp) / PSG write
+
+; Mode 4 pointers
+
+scrpattern:     equ     0
+sprpattern:     equ     02000h
+scrnametable:   equ     03800h
+sprattrib:      equ     03F00h
+
+
+                ; Rom header
+
+                org     04000h
+                db      041h,042h
+                dw      init
+                ds      12,0
+
+; *** SLOT ROUTINES ***
+
+
+; -----------------------
+; SEARCH_SLOTSET
+; Posiciona en pagina 2
+; Nuestro ROM.
+; -----------------------
+
+search_slotset:
+				call	search_slot
+				ld		(slotvar),a
+
+				jp		ENASLT
+
+
+; -----------------------
+; SEARCH_SLOT
+; Busca slot de nuestro rom
+; -----------------------
+
+search_slot:
+
+				call	0138h
+				rrca
+				rrca
+				and		3
+				ld		c,a
+				ld		b,0
+				ld		hl,EXPTBL
+				add		hl,bc
+				ld		a,(hl)
+				and		080h
+				jr		z,search_slot0
+				or		c
+				ld		c,a
+				inc		hl
+				inc		hl
+				inc		hl
+				inc		hl
+				ld		a,(hl)
+				and		0Ch
+search_slot0:
+				or		c
+				ld		h,080h
+				ret
+
+; *** ROM Code ***
+
+init:
+                
+                ; Check franky and if is not present continue BIOS init
+                call    checkfranky
+                ret     z               ; Continue MSX Bios init
+                
+                ; Normal rom init
+                im      1
+                ld      sp,0F380h
+                
+                ; Set ROM code in Z80 page 2
+                call    search_slotset
+
+                ; Init vars
+                ld      hl,initmem
+                ld      de,initmem+1
+                ld      bc,endmem-initmem
+                ld      (hl),0
+                ldir
+
+                ; Screen 2 in MSX VDP
+                ld      a,2
+                call    CHGMOD
+
+
+                ; yeah! Franky is present
+                ld      a,1
+                ld      (franky),a
+                
+    
+                ; Read VDP MSX Write Ports
+                ld      a,(07h)
+                ld      (vdp98portw),a
+                inc     a
+                ld      (vdp99portw),a
+                ; Read VDP MSX Read Ports
+                ld      a,(06h)
+                ld      (vdp98portr),a
+                inc     a
+                ld      (vdp99portr),a
+
+
+
+
+                ; Disable MSX ints
+                call    dismsxint
+
+                ; Beware if here you put a halt .... MSX hangs!!!
+               
+                call    finitregs
+                
+                
+                ; set pal
+                ld      hl,paltest
+                call    fsetpalette
+                ld      hl,palspr
+                call    fsetsprpalette
+
+                ; Similar to ld a,4 call CHGMOD
+                call    fsetmode4
+
+
+                ; Here Franky ints ON
+
+
+                ; Check Franky Refresh 
+
+                call    checkrefresh
+
+           
+                call    loadsprites
+                
+                call    fenascr
+
+            
+
+                ; Example, use hook HKEYI
+                ; You can't use HTIMI because BIOS only jumps to HTIMI if VDP MSX procuce a new int
+
+                ; Set H.KEYI hook
+
+                ld      hl,interrupt
+                ld      a,0C3h
+                ld      (HKEYI),a
+                ld      (HKEYI+1),hl
+
+                ; Disable H.TIMI hook
+                ld      a,0C9h
+                ld      (HTIMI),a
+
+                ; Restart interrupts
+                ; And infinite loop
+.wait:
+                ei
+                jr     .wait
+
+; ------------------------------
+; interrupt
+; Example interrupt
+; Reads Franky Port
+; And change border color in MSX
+; ------------------------------
+
+interrupt:
+                ; No push all registers needed, KEYINT bios (038h) do it;
+                di 
+
+                in      a,(FVDP89)
+                and     a
+                jp      p,.notVBL           ; isn't a Franky Frame interrupt
+                ld      (fstatus),a
+                ; Change border color
+                di
+                ld      a,(vdp99portw)
+                ld      c,a
+                ld      hl,JIFFY
+                inc     (hl)                ; remove this line if you use keyint = 1
+                ld      a,(hl)
+                and     0Fh
+                ld      b,a
+                ld      a,(RG0SAV+7)
+                and     0F0h
+                or      b
+                out     (c),a
+                ld      (RG0SAV+7),a
+                ld      a,128+7
+                out     (c),a
+
+.notVBL:
+                ; Check if the user wants KEYINT enabled
+                ; beware: if franky is pal and msx ntsc or viceversa you can have async problems
+                ld      a,(keyint)
+                or      a
+                ret     nz
+                
+                ; pop all registers and extra pop for this ret
+
+                pop     hl ; extra pop
+                
+                pop     ix
+                pop     iy
+                pop     af
+                pop     bc
+                pop     de
+                pop     hl
+                ex      af,af'
+                exx
+                pop     af
+                pop     bc
+                pop     de
+                pop     hl
+                ei
+                ret
+
+
+; -------------------
+; dismsxint
+; Disable all VDP MSX
+; Interrupts
+; --------------------
+
+dismsxint:
+                ld      a,(vdp99portw)
+                ld      c,a
+                ei
+                halt
+                di
+                ld      a,(RG0SAV)
+                and     001001111b
+                out     (c),a
+                ld      (RG0SAV),a
+                ld      a,128
+                out     (c),a
+
+                ld      a,(RG0SAV+1)
+                and     011011111b
+                out     (c),a
+                ld      (RG0SAV+1),a
+                ld      a,128+1
+                out     (c),a
+                ret
+
+
+; *** Franky VDP routs ***
+
+; -----------------------
+; FINITREGS
+; Init franky registers
+; Mode 4
+; Screen disable
+; Interrupts enabled
+; Scroll disabled
+; -----------------------
+
+finitregs:
+                ld      hl,.data
+                ld      de,freg0
+                ld      bc,10
+                ldir
+
+                ; Write to registers
+
+                ld      hl,.data
+                ld      c,128
+                ld      b,10
+                di
+.loop:
+                ld      a,(hl)
+                out     (FVDP89),a
+                inc     hl
+                ld      a,c
+                inc     c
+                out     (FVDP89),a
+                djnz    .loop
+                ret
+
+.data:
+                db      000000100b      ; M4 on M2 off (192 lines)
+                db      000100000b      ; Display disable ints enabled
+                db      000001110b      ; Tile Name table to 03800h
+                db      011111111b      ; Not used in Mode 4
+                db      011111111b      ; Not used in Mode 4
+                db      011111111b      ; Sprite name table to 03F00h
+                db      011111111b      ; Sprite pattern gen base adress 02000h
+                db      0               ; Overscan color 0
+                db      0               ; Background X scroll 0
+                db      0               ; Background Y scroll 0
+                db      0               ; Line counter 0 (no line interrupts active)
+
+
+
+
+; ---------------------
+; checkfranky
+; Check if Franky VDP
+; is present
+; Return:
+; Z = 1 : No franky
+; --------------------
+
+checkfranky:
+
+                di
+
+                ; Check port FPSGHC times (255 if franky no present)
+
+                in      a,(FPSGHC)
+                inc     a
+                ld      b,a
+                in      a,(FPSGHC)
+                inc     a
+                jr      nz,.lastcheck
+                ld      a,b
+                or      a
+                ret     z           ; Two times 255, no franky present
+.lastcheck:
+                in      a,(FPSGHC)
+                inc     a
+                ret
+
+; -------------------------
+; finitvramw
+; Init vram to write data
+; HL: Pointer
+; ------------------------
+
+finitvramw:
+                di
+                ld      c,FVDP89
+                out     (c),l
+                set     6,h
+                nop                 ; Secure
+                out     (c),h
+                ret
+
+
+
+
+; ----------------------
+; fdisscr
+; Similar a DISSCR BIOS
+; ----------------------
+
+fdisscr:
+                di
+                ld      a,(freg1)
+                and     010111111b
+.gen:
+                out     (FVDP89),a
+                ld      (freg1),a
+                ld      a,128+1
+                out     (FVDP89),a
+                ret
+
+; ----------------------
+; fenascr
+; Similar to ENASCR BIOS
+; -----------------------
+fenascr:
+                di
+                ld      a,(freg1)
+                or      001000000b
+                jr      fdisscr.gen
+
+
+; -----------------------
+; checkrefresh
+; Check Refresh (60/50 hz)
+; and save in hz var
+; HZ = 1 60hz 0 50hz
+; ------------------------
+
+checkrefresh:
+                di
+                ld      a,1
+                ld      (hz),a
+
+                ; clear pending interrupts
+                in      a,(FVDP89)
+                ld      hl,0
+
+                ; Sync to interrupt
+.sync:
+                in      a,(FVDP89)
+                and     a
+                jp      p,.sync
+                
+                ; Benchmark
+.bench:
+                inc     hl
+                in      a,(FVDP89)
+                and     a
+                jp      p,.bench
+                
+                ; HL = 7F7h aprox 50hz
+
+                ld      de,071Dh
+                sbc     hl,de
+                ret     c
+
+                ; 50hz
+                xor     a
+                ld      (hz),a
+                ret
+
+
+; -----------------------------
+; fsetmode4
+; Set mode 4 in Franky
+; Enables Sprites 8x16
+; Mode 4 Normal (256x192)
+; Clear VRAM
+; Init sprites out of screen
+; -----------------------------
+
+fsetmode4:
+
+                ; Save screen disable/enable value
+                ex      af,af
+                ld      a,(freg1)
+                and     001000000b
+                ex      af,af 
+                call    fdisscr
+                call    fsetmode4gen
+
+                ; Delete VRAM like as Screen 2 in MSX
+
+                ; Clear title and sprite data
+                ld      hl,0
+                call    finitvramw
+                ld      hl,scrnametable
+.loop:
+                xor     a
+                out     (FVDP88),a
+                dec     hl
+                ld      a,h
+                or      l
+                jr      nz,.loop
+            
+                ; Init name table (0-255)
+                ; Pointer initialized
+
+                ld      hl,0700h
+                ld      c,0
+.loop2:
+                ld      a,c
+                out     (FVDP88),a      ; Only 0-256 values
+                nop
+                nop 
+                xor     a
+                out     (FVDP88),a      ; No tile especial info
+                inc     c
+                dec     hl
+                dec     hl
+                ld      a,h
+                or      l
+                jr      nz,.loop2
+
+                ; Sprites out of screen D1
+                ld      b,64
+.loop3:                
+                 
+                ld      a,0D1h
+                out     (FVDP88),a      
+                djnz    .loop3
+
+                ld      hl,sprattrib+64
+                call    finitvramw
+
+                ld      b,64
+                ld      c,0
+.loop4:
+                xor     a               ; X coordinate
+                out     (FVDP88),a      
+                ld      a,c
+                inc     c
+                inc     c
+                out     (FVDP88),a      ; Tile (0-128)
+                djnz    .loop4
+                
+                ex      af,af
+                ld      b,a
+                ex      af,af
+                ld      a,(freg1)
+                and     010111111b
+                or      b
+                out     (FVDP89),a
+                ld      (freg1),a
+                ld      a,128+1
+                out     (FVDP89),a
+
+                ret
+
+; --------------------------------
+; FSETMODE4GEN
+; Sets MODE4 normal mode (256x192)
+; with
+; 00000h Pattern gen table 
+; 02000h Sprite gen table
+; 03800h Name table
+; 03F00h Sprite name table
+; Sprite 8x16
+; --------------------------------
+
+
+
+fsetmode4gen:
+                di
+                ld      a,(freg0)
+                and     011111001b
+                or      000000100b
+                out     (FVDP89),a
+                ld      (freg0),a
+                ld      a,128+0
+                out     (FVDP89),a
+
+                
+                ld      a,(freg1)
+                and     011100101b
+                or      000000010b
+                out     (FVDP89),a
+                ld      (freg1),a
+                ld      a,128+1
+                out     (FVDP89),a
+                
+                ld      a,0FFh
+                out     (FVDP89),a
+                ld      (freg5),a
+                ld      a,128+5
+                out     (FVDP89),a
+                
+                
+                ld      a,0FFh
+                out     (FVDP89),a
+                ld      (freg6),a
+                ld      a,128+6
+                out     (FVDP89),a
+
+                ret
+
+
+; ----------------------
+; FSETPALETTE
+; Set palette (0 palette)
+; HL : Data
+; ----------------------
+
+fsetpalette:
+                ld      c,0
+.gen:
+    
+                ld      b,16
+                di
+.loop:                
+                ld      a,c
+                out     (FVDP89),a
+                inc     c
+                ld      a,0C0h
+                out     (FVDP89),a
+                ld      a,(hl)
+                inc     hl
+                out     (FVDP88),a
+                djnz    .loop
+                ret
+; -------------------------------------
+; FSETSPRPALETTE
+; Set second palette (sprites palette)
+; HL: Data
+; -------------------------------------
+
+
+fsetsprpalette:
+                ld      c,16
+                jr      fsetpalette.gen
+
+; -----------------
+; FSETCOLOR
+; Set color A to C
+; -----------------
+
+fsetcolor:
+                di
+                out     (FVDP89),a
+                ld      a,0C0h
+                out     (FVDP89),a
+                ld      a,c
+                nop
+                out     (FVDP88),a
+                ret
+
+
+; ------------------------------------------------------------------
+
+loadsprites:
+                ld      hl,sprpattern
+                call    finitvramw
+                ld      hl,SPRDATA
+                ld      bc,192*8*4
+.loop:
+                ld      a,(hl)
+                inc     hl
+                out     (FVDP88),a
+                dec     bc
+                ld      a,b
+                or      c
+                jr      nz,.loop
+
+                ; put sprites in screen
+                ; put y data
+
+                ld      hl,sprattrib
+                call    finitvramw
+
+            
+                ld      e,-1
+                ld      b,8
+.ydataout:                
+                push    bc
+                ld      b,4
+.ydatain:
+                ld      a,e
+                out     (FVDP88),a
+                nop
+                nop
+                out     (FVDP88),a
+                djnz    .ydatain
+
+                add     a,16
+                ld      e,a
+                pop     bc
+                djnz    .ydataout
+                
+                ; put x data and pattern
+            
+                ld      hl,sprattrib+128
+                call    finitvramw
+                
+                ld      b,8
+                ld      e,0
+                ld      d,0
+.xdataout:
+
+                push    bc
+                ld      b,4
+.xdatain:
+                ld      a,d
+                out     (FVDP88),a
+                add     a,8
+                ld      d,a
+
+                ld      a,e
+                out     (FVDP88),a
+
+                add     a,2
+                ld      e,a
+
+                ld      a,d
+                out     (FVDP88),a
+                add     a,8
+                ld      d,a
+                ld      a,e
+                out     (FVDP88),a
+                add     a,2
+                ld      e,a
+                ld      a,d
+                add     a,16
+                ld      d,a
+                djnz    .xdatain
+
+                pop     bc
+                ld      d,0
+                djnz    .xdataout
+                ret
+
+
+
+; *** DATA *** 
+
+paltest:
+                db      00h,20h,30h,34h,15h,08h,26h,06h,03h,07h,0Fh,1Dh,38h,22h,2Ah,3Fh
+palspr:
+                db      00h,01h,04h,10h,03h,17h,2bh,0fh,0eh,3dh,1ah,2fh,36h,37h,2ah,3fh
+SPRDATA:
+                INCBIN  "MS-SPR.SPR"
+
+                ; Fill to 32k
+
+endrom:
+                ds      0C000h-$,0FFh
+
+
+; *** VARS ***
+
+initmem:        equ     0E000h
+slotvar:        equ     initmem
+franky:         equ     slotvar     + 1
+vdp98portw:     equ     franky      + 1     ; MSX VDP data port write
+vdp99portw:     equ     vdp98portw  + 1     ; MSX VDP control port write
+vdp98portr:     equ     vdp99portw  + 1     ; MSX VDP data port read
+vdp99portr:     equ     vdp98portr  + 1     ; MSX VDP control port read
+freg0:          equ     vdp99portr  + 1     ; Franky Regs 
+freg1:          equ     freg0       + 1 
+freg2:          equ     freg1       + 1
+freg3:          equ     freg2       + 1
+freg4:          equ     freg3       + 1
+freg5:          equ     freg4       + 1
+freg6:          equ     freg5       + 1
+freg7:          equ     freg6       + 1
+freg8:          equ     freg7       + 1
+freg9:          equ     freg8       + 1
+frega:          equ     freg9       + 1
+fstatus:        equ     frega       + 1     ; Copy status register of Franky VDP
+keyint:         equ     fstatus     + 1     ; 0 : Key int disabled 1 Key int enabled
+hz:             equ     keyint      + 1     ; 0 : 50hz 1 60hz
+endmem:         equ     hz          + 1     ; End mem
+
+

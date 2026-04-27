@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+
+# **********************************************
+# * PNG2SR5 Tool                               *
+# * Convert PNG file to SR5 file               *
+# **********************************************
+
+
+import array, struct, sys, io, os, string, math
+from PIL import Image
+
+# ---------------------
+# Constant DEFINES
+# ---------------------
+
+PROGRAMNAME = "PNG2SMS Sprite Tool"
+VERSION = "1.0"
+COPYRIGHT = "2016"
+HEADEROFFSET = 7
+
+
+
+# -----------------------------------------------------------------------------
+# Logo, usage and help
+# -----------------------------------------------------------------------------
+
+def logo():
+    print('%s v%s (c) %s Ramones' % (PROGRAMNAME, VERSION, COPYRIGHT))
+
+
+def usage(execfile):
+    print("\nUsage: %s input output\n" % execfile)
+    print("     input:    4 bit indexed PNG File.")
+    print("     output:   Converted Raw Mode 4 data file.")
+    print() 
+
+# -----------------------------------------------------------------------------
+# File I/O
+# -----------------------------------------------------------------------------
+
+
+def readfile(namefile, header=True, offset=HEADEROFFSET):
+    arr = []
+    f = open(namefile, 'rb')
+    if (header):
+        f.seek(offset)
+    bytes_read = f.read()
+    for b in bytes_read:
+        byte = struct.unpack('B', b)
+        arr.append(byte[0])
+    f.close()
+    return arr
+
+
+def readstringfile(namefile):
+    f = open (namefile, 'r')
+    string = f.read()
+    f.close()
+    return string
+
+
+def writefile(namefile, data):
+    f = open (namefile,'wb')
+    for b in data:
+        byte = struct.pack('B',b)
+        f.write(byte)
+    f.flush()
+    f.close()            
+
+        
+def writestringfile(namefile, string):
+    f = open (namefile, 'wb')
+    for b in string:
+        f.write(b)
+    f.flush()
+    f.close()
+
+
+
+# -----------------------------------------------------------------------------
+# PNG
+# -----------------------------------------------------------------------------
+
+def pixelstoraw (pixels):
+    raw = []
+    for row in pixels:
+        for i in range(0, len(row)):
+            raw.append(row[i])
+    return raw
+
+def getpaletteindexes (pixels, pal):
+
+    palindexes = []
+
+    for pixel in pixels:
+        if (pixel in palindexes) == False:
+            palindexes.append(pixel)
+
+        if (len(palindexes) == 16):
+            break
+
+    palindexes = sorted(palindexes)
+    return palindexes
+
+
+# -----------------------------------------------------------------------------
+# Mode 4 Sprites
+# -----------------------------------------------------------------------------
+
+
+
+def getrawsprpat (pat, rawdata):
+    patraw = []
+
+    x = ((pat & 63) >> 1) * 8
+    #y = ((pat & 1) * 8 * 256) + ((pat & 0xC0) >> 6) * 256 * 16
+    y = ((pat & 1) * 8 * 256) + ((pat & 0xFC0) >> 6) * 256 * 16
+    offset = x + y
+    #print "X: %X" % x
+    #print "Y: %X" % y
+    #print "Offset: %X" % offset
+    for line in range (0, 8):
+        for pixel in range(0, 8):
+            index = (offset + (line * 256)) + pixel
+            patraw.append(rawdata[index])
+
+    return patraw
+
+def patrawtosprmode4 (patraw, palindex):
+
+    patmode4 = []
+
+    for line in range (0, 8):
+        by0 = 0
+        by1 = 0
+        by2 = 0
+        by3 = 0
+        for pixel in range (0, 8):
+            rawbyte = patraw[(line * 8) + pixel]
+            byte = palindex.index(rawbyte) 
+            
+            b0 = byte & 1
+            b1 = (byte >> 1) & 1
+            b2 = (byte >> 2) & 1
+            b3 = (byte >> 3) & 1
+            by0 = by0 << 1
+            by1 = by1 << 1
+            by2 = by2 << 1
+            by3 = by3 << 1
+            by0 = (by0 | b0) 
+            by1 = (by1 | b1)
+            by2 = (by2 | b2)
+            by3 = (by3 | b3)
+        
+        patmode4.append(by0)
+        patmode4.append(by1)
+        patmode4.append(by2)
+        patmode4.append(by3)
+
+    return patmode4
+
+def rawtomode4 (rawdata, palindex):
+    mode4 = []
+    for pat in range(0, 256 + 128):
+        patraw = getrawsprpat(pat, rawdata)
+        patmode4 = patrawtosprmode4(patraw, palindex)
+        for line in patmode4:
+            mode4.append(line)
+    return mode4
+
+def color2sms (color):
+
+    smscolor = 0x00;
+    if (color == 0x55):
+        smscolor = 0x01;
+    if (color == 0xAA):
+        smscolor = 0x02;
+    if (color == 0xFF):
+        smscolor = 0x03;
+    return smscolor;
+
+
+def paltomode4 (palette, palindex):
+
+    pal = [];
+
+    for idx in palindex:
+        colour = palette[idx]
+        r = colour[0];
+        g = colour[1];
+        b = colour[2];
+
+        #r = ((r / 255.0) * 3.0)
+        #g = ((g / 255.0) * 3.0)
+        #b = ((b / 255.0) * 3.0)
+        #r = int(r)
+        #g = int(g)
+        #b = int(b)
+
+        r = color2sms(r);
+        g = color2sms(g);
+        b = color2sms(b);
+
+        rgb = b << 4 | g << 2 | r
+
+        pal.append (rgb)
+        
+   
+    if len(pal) < 16:
+        add = 16 - len(pal)
+        for i in range(add):
+            pal.append(0x00)
+
+    return pal
+
+
+def palmode4todb (pal):
+
+    paldb = ""
+    paldb += "; Autogenerated by PNG2SMS Tool \n\n\n"
+    paldb += "\tDEFB\t" 
+
+    for i in range (0, 8):
+        col = pal[i]
+        paldb += "#"
+        if (col < 0x10):
+            paldb += "0"
+        paldb += "%X" % col
+        if (i < 7):
+            paldb += ", "
+
+    paldb += "\n\tDEFB\t" 
+    for i in range (8, 16):
+        col = pal[i]
+        paldb += "#"
+        if (col < 0x10):
+            paldb += "0"
+        paldb += "%X" % col
+        if (i < 15):
+            paldb += ", "
+
+    paldb += "\n\n"
+
+    return paldb
+
+# -----------------------------------------------------------------------------
+# Main program
+# -----------------------------------------------------------------------------
+
+def main(args):
+    
+    logo()
+   
+    if (len(args) < 3):
+        usage(args[0])
+        exit (-1)
+
+    filename = args[1]
+    outputname = args[2]
+    
+    print("Input:  ", filename)
+    print("Output: ", outputname)
+
+    # Read and process 
+
+    img = Image.open(filename)
+    if img.mode != 'P':
+        print("ERROR: Not indexed image!!")
+        exit(-1)
+    w, h = img.size
+
+    print("Width : ", w)
+    print("Height: ", h)
+
+    if (w > 256):
+        print("ERROR: Max Width = 256!!!!")
+        exit(-1)
+
+    palette_mode, palette_data = img.palette.getdata()
+    stride = len(palette_mode)
+    n_colors = len(palette_data) // stride
+    palette = [(palette_data[i*stride], palette_data[i*stride+1], palette_data[i*stride+2]) for i in range(n_colors)]
+
+    if len(palette) > 16:
+        print("Waring: > 16 colour image!!")
+
+    raw_pixels = img.tobytes()
+    pixel_list = [list(raw_pixels[y*w:(y+1)*w]) for y in range(h)]
+
+    # list pixels to raw data
+    rawdata = pixelstoraw(pixel_list)
+
+
+    # Fill palette indexex
+    palindex = getpaletteindexes(rawdata, palette)
+
+    mode4data = rawtomode4(rawdata, palindex)    
+
+    paldata = paltomode4(palette, palindex)
+
+
+
+    paldb = palmode4todb (paldata)
+
+    writefile (outputname, mode4data);
+    writefile (outputname + ".PAL", paldata)
+    writestringfile (outputname + ".Z8A", paldb)
+
+    exit(0)
+
+# ---------------------
+# Call to Main
+# ---------------------
+
+main(sys.argv)    
+
+
+
+

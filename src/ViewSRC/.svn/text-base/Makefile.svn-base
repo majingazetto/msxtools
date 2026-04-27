@@ -1,0 +1,42 @@
+#Makefile para ViewSR5
+
+SHELL=/bin/bash
+SDLMACINCLUDE= -I/Library/Frameworks/SDL.framework/Headers
+INCLUDES = $(SDLMACINCLUDE) -I. -ISound/
+LIBS=SDLmain.m -framework SDL -framework Cocoa
+#LIBS=SDLmain.m -framework SDL 
+PROGRAM = viewSR5
+BINDST = ../bin
+
+all: $(PROGRAM) tobin
+
+
+clean:
+	
+	@if [ -f $(PROGRAM) ] ;\
+	then \
+		rm $(PROGRAM) ;\
+	fi
+	
+	@if [ -f $(PROGRAM).d ] ;\
+	then \
+		rm $(PROGRAM).d ;\
+	fi
+	
+	@if [ -f $(BINDST)/$(PROGRAM) ] ;\
+	then \
+		rm $(BINDST)/$(PROGRAM);\
+	fi
+
+$(PROGRAM):
+	gcc -Wall $(LIBS) $(INCLUDES) main.c  Files.c  Memory.c LoadPicture.c ColorSpaceConv.c DrawPrimitives.c SysMacOSX.c ScreenDump.c Print.c Screens.c	Timer.c Input.c AMOSLib.c -o $(PROGRAM)
+	@echo -n "$(PROGRAM): " > $(PROGRAM).d
+	@echo "main.c  Files.c  Memory.c LoadPicture.c ColorSpaceConv.c DrawPrimitives.c SysMacOSX.c ScreenDump.c Print.c Screens.c Timer.c Input.c AMOSLib.c" >> $(PROGRAM).d
+	
+tobin:
+	@if [ -d $(BINDST) ] ;\
+	then \
+		cp $(PROGRAM) $(BINDST) ;\
+	fi
+
+-include $(PROGRAM).d

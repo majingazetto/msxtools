@@ -1,0 +1,758 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void LocatePattern(int fptr);
+void LocateVoice(int fptr);
+
+struct StructChannel {
+		struct StructSequence	*seqptr;
+		int seqlen;
+		long fptr;
+		long newfptr;
+} Channel[9+5+3];
+
+struct StructSequence {
+		struct StructSequence *next;
+		struct StructPattern *pattern;
+		unsigned int repeat;
+} *SequenceCurrent;
+
+struct StructPattern {
+		struct StructPattern *next;
+		long fptr;
+		long newfptr;
+		int type;
+		int len;
+		unsigned char data[1024];
+} *PatternFirst = NULL, *PatternCurrent, *PatternPrev;
+
+struct StructVoice {
+		struct StructVoice *next;
+		long fptr;
+		long newfptr;
+		int type;
+		int len;
+		unsigned char data[64];
+} *VoiceFirst = NULL, *VoiceCurrent;
+
+int main(int argc, char *argv[]) {
+		
+		FILE *infile, *outfile;
+		int in,flagdrum;
+		int compAddr, loadAddr;
+		int i, numchn, src;
+		
+		printf("BGM2TMF v2.0 by Patriek Lesparre\n(c) The New Image 2003\n");
+		printf("Rearranged version by Ramones\n(c) Kralizec 2007\n");
+if (argc < 4 || argc > 5) {
+		printf("Usage: BGM2TMF {infile} {outfile} {address}|src \n");
+		printf("       (address must be in C-notation)\n");
+		printf("                src - output sourcecode to outfile\n");
+		return 0;
+}
+
+
+
+infile = fopen(argv[1], "rb");
+if (!infile) return -1;
+outfile = fopen(argv[2], "wb");
+if (!outfile) return -1;
+if (!strcmp(argv[3],"src")) {
+		loadAddr = 0;
+		src = 1;
+} else {
+		loadAddr = (int)strtol(argv[3],NULL,16);
+		src = 0;
+}
+
+fseek(infile, 1, SEEK_SET);
+in = fgetc(infile);
+compAddr = in + 256 * fgetc(infile);
+
+fseek(infile, 7, SEEK_SET);
+flagdrum = fgetc(infile);	      // Get FM Flag
+
+
+
+numchn = 9+5+3;
+
+
+
+
+
+// read sequence start
+int chn;
+for (i = 0; i < numchn; i++) {
+		in = fgetc(infile);
+		in = in + 256 * fgetc(infile);
+		
+		if (!in) Channel[i].fptr = 0;
+		else Channel[i].fptr = in - (compAddr - 7);
+}
+
+
+
+// read sequences and create patterns pointers
+for (i = 0; i < numchn; i++) {
+		if (!Channel[i].fptr) {
+				Channel[i].seqptr = NULL;
+				continue;
+		}
+		fseek(infile, Channel[i].fptr, SEEK_SET);
+		
+		SequenceCurrent = (struct StructSequence *)malloc(sizeof(struct StructSequence));
+		SequenceCurrent->next = NULL;
+		Channel[i].seqptr = SequenceCurrent;
+		Channel[i].seqlen = 0;
+		
+		in = fgetc(infile);
+		in = in + 256 * fgetc(infile);
+		in = in - (compAddr - 7);
+		
+		for (;;) {
+				SequenceCurrent->repeat = fgetc(infile);
+				LocatePattern(in);
+				PatternCurrent->fptr = in;
+				
+				
+				
+				if (i < 9) {
+					PatternCurrent->type = 0;	
+				}
+				else
+				if (i < 12) {
+					PatternCurrent->type = 2;	
+				}
+				else
+					PatternCurrent->type = 3;	
+				
+				if ((flagdrum==0) && (i == 6)) {
+						PatternCurrent->type = 1;
+				}
+				
+				
+				SequenceCurrent->pattern = PatternCurrent;
+				
+				Channel[i].seqlen++;
+				
+				in = fgetc(infile);
+				in = in + 256 * fgetc(infile);
+				
+				if (!in) break;
+				
+				in = in - (compAddr - 7);
+				
+				SequenceCurrent->next = (struct StructSequence *)malloc(sizeof(struct StructSequence));
+				SequenceCurrent = SequenceCurrent->next;
+				SequenceCurrent->next = NULL;
+		}
+}
+
+
+
+
+// read patterns
+int Quantize = 0;
+int Legato = 0;
+
+PatternCurrent = PatternFirst;
+i = 0;
+fseek(infile, PatternCurrent->fptr, SEEK_SET);
+
+for(;;) {
+		
+		in = fgetc(infile);
+		if (in == 0xFF) {
+				PatternCurrent->data[i++] = in;
+				PatternCurrent->len = i;
+				
+				PatternCurrent = PatternCurrent->next;
+				if (!PatternCurrent) break;
+				
+				Quantize = 0;
+				Legato = 0;
+				
+				i = 0;
+				fseek(infile, PatternCurrent->fptr, SEEK_SET);
+				continue;
+		}
+		
+		if (PatternCurrent->type != 1) {  // Normal Pattern
+				if (in < 0x60) {		      // rest/note
+						PatternCurrent->data[i++] = in;
+						in = fgetc(infile);	      // length
+						if (in == 255) fprintf(stderr,"WARNING: LONG LENGTH!");
+						
+						if ((Legato == 0) && (Quantize > 0)) {
+								int r = 0;
+								int q = 0;
+								for (q = 0; q < Quantize; q++) r += in;
+								r >>= 3;
+								if (r == 0) r = 1;
+								PatternCurrent->data[i++] = r;
+								in = in - r;
+								if (in <= 0) fprintf(stderr,"Q error\n");
+								
+								PatternCurrent->data[i++] = 0;
+						}
+						PatternCurrent->data[i++] = in;
+				} else if (in < 0x70) {	      // volume
+						PatternCurrent->data[i++] = in;
+				} else if (in < 0x80) {	      // FM instr chg
+						PatternCurrent->data[i++] = in;
+				} else {
+						switch (in) {
+								case 0x80:		      // FM Sustain Off
+										PatternCurrent->data[i++] = in;
+										break;
+								case 0x81:		      // FM Sustain On
+										PatternCurrent->data[i++] = in;
+										break;
+								case 0x82:		      // Motor/KeyClick (ignored)
+										in = fgetc(infile);
+										break;
+								case 0x83:		      // Instrument change
+										PatternCurrent->data[i++] = in;
+										in = fgetc(infile);
+										in = in + 256 * fgetc(infile);
+										in = in - (compAddr - 7);
+										
+										LocateVoice(in);
+										VoiceCurrent->fptr = in;
+										VoiceCurrent->type = PatternCurrent->type;
+										
+										PatternCurrent->data[i++] = in & 0xFF;
+										PatternCurrent->data[i++] = in >> 8;
+										break;
+								case 0x84:		      // Legato Off
+										PatternCurrent->data[i++] = in;
+										Legato = 0;
+										break;
+								case 0x85:		      // Legato On
+										PatternCurrent->data[i++] = in;
+										Legato = 1;
+										break;
+								case 0x86:		      // Quantize
+										in = fgetc(infile);
+										if (in > 0 && in < 8) in++;	      // Q1-7 -> Q2-8
+												if (in == 8) in = 0;
+														Quantize = in;
+										break;
+								case 0x87:		      // Detune
+										PatternCurrent->data[i++] = in;
+										PatternCurrent->data[i++] = fgetc(infile);
+										break;
+								case 0x88:		      // Portamento Speed
+										PatternCurrent->data[i++] = in;
+										PatternCurrent->data[i++] = fgetc(infile);
+										break;
+								case 0x89:		      // Vibrato Depth
+										PatternCurrent->data[i++] = in;
+										PatternCurrent->data[i++] = fgetc(infile);
+										break;
+								case 0x8B:		      // Vibrato / Portamento Step
+										PatternCurrent->data[i++] = in; //PatternCurrent->data[i++] = 0x86;   // replace
+										PatternCurrent->data[i++] = fgetc(infile);
+										break;
+								case 0x8C:		      // Register Write
+										PatternCurrent->data[i++] = in;//PatternCurrent->data[i++] = 0x82;   // replace
+										PatternCurrent->data[i++] = fgetc(infile);
+										PatternCurrent->data[i++] = fgetc(infile);
+										break;
+								case 0x8D:		      // Wait (replace with Rest)
+										PatternCurrent->data[i++] = 0;
+										in = fgetc(infile);
+										PatternCurrent->data[i++] = in;
+										break;
+								default:		      // ignore other values
+
+										break;
+						}
+				}
+		} else {			      // Drum Pattern
+				if (in == 0xC0) {		      // Register Write
+						PatternCurrent->data[i++] = in;
+						PatternCurrent->data[i++] = fgetc(infile);
+						PatternCurrent->data[i++] = fgetc(infile);
+				} else if (in == 0xC1) {	      // Wait
+						PatternCurrent->data[i++] = 0;
+						in = fgetc(infile);
+						PatternCurrent->data[i++] = in;
+				} else if (in < 0x80) {	      // play drum
+						PatternCurrent->data[i++] = in;
+						in = fgetc(infile);	      // length
+						PatternCurrent->data[i++] = in;
+				} else {			      // Drum Volumes
+						PatternCurrent->data[i++] = in;
+						PatternCurrent->data[i++] = fgetc(infile);
+				}
+		}
+}
+
+// read voice data
+VoiceCurrent = VoiceFirst;
+for(;;) {
+		int cnt;
+		
+		fseek(infile, VoiceCurrent->fptr, SEEK_SET);
+		
+		if (VoiceCurrent->type == 0) {
+				i = 0;
+				for (cnt = 0; cnt < 8; cnt++) {
+						in = fgetc(infile);
+						VoiceCurrent->data[i++] = in;
+				}
+		} else if (VoiceCurrent->type == 2) {
+				i = 0;
+				for (cnt = 0; cnt < 6; cnt++) {
+				
+					in = fgetc(infile);
+					VoiceCurrent->data[i++] = in;
+
+					
+				}
+		} else  if (VoiceCurrent->type == 3) {
+				i = 0;
+				for (cnt = 0; cnt < 32+4; cnt++) {
+				
+					in = fgetc(infile);
+					VoiceCurrent->data[i++] = in;
+
+					
+				}
+
+
+		
+		}
+		else
+		{
+		
+						
+		
+		
+				fprintf(stderr,"Error");
+				break;
+		}
+		VoiceCurrent->len = i;
+		
+		VoiceCurrent = VoiceCurrent->next;
+		if (!VoiceCurrent) break;
+}
+
+// Process
+
+// - add consequent rests together
+PatternCurrent = PatternFirst;
+i = 0;
+for (;;) {
+		int cnt;
+		
+		in = PatternCurrent->data[i++];
+		
+		if (PatternCurrent->type == 1 || in == 0xFF) {
+				PatternCurrent = PatternCurrent->next;
+				if (!PatternCurrent) break;
+				i = 0;
+				continue;
+		}
+		
+		if (in == 0x00) {		      // rest
+				if ((PatternCurrent->data[i+1] == 0x00) && (PatternCurrent->data[i] + PatternCurrent->data[i+2] < 256)) {
+						PatternCurrent->data[i] += PatternCurrent->data[i+2];
+						for (cnt = i+3; cnt < PatternCurrent->len; cnt++) {
+								PatternCurrent->data[cnt-2] = PatternCurrent->data[cnt];
+						}
+						i--;  // parse again
+						PatternCurrent->len -= 2;
+				} else {
+						i++;
+				}
+		} else if (in < 0x60) {
+				i++;
+		} else {
+				switch (in) {
+						default:
+								break;
+						case 0x86:		      // Quantize
+						case 0x87:		      // Detune
+						case 0x88:		      // Portamento Speed
+						case 0x89:		      // Vibrato Depth
+						case 0x8B:		      // Vibrato / Portamento Step
+								i++;
+								break;
+						case 0x83:		      // Instrument change
+						case 0x8C:		      // Register Write
+								i++;
+								i++;
+								break;
+				}
+		}
+}
+
+// - remove empty patterns
+PatternCurrent = PatternFirst;
+for (;;) {
+		if (PatternCurrent->len == 1) {
+				
+				for (i = 0; i < numchn; i++) {
+						SequenceCurrent = Channel[i].seqptr;
+						if (!SequenceCurrent) continue;
+						
+						if (SequenceCurrent->pattern == PatternCurrent) {
+								Channel[i].seqptr = SequenceCurrent->next;
+								Channel[i].seqlen--;
+						}
+						
+						for (;;) {
+								if (!SequenceCurrent->next) break;
+								
+								if (SequenceCurrent->next->pattern == PatternCurrent) {
+										SequenceCurrent->next = SequenceCurrent->next->next; // mem leak
+										Channel[i].seqlen--;
+								} else {
+										SequenceCurrent = SequenceCurrent->next;
+								}
+						}
+				}
+				
+				if (PatternCurrent == PatternFirst) {
+						PatternFirst = PatternCurrent->next; // mem leak
+						break;
+				}
+				
+				PatternPrev = PatternFirst;
+				for (;;) {
+						if (PatternPrev->next == PatternCurrent) {
+								PatternPrev->next = PatternCurrent->next; // mem leak
+								break;
+						}
+						PatternPrev = PatternPrev->next;
+						if (!PatternPrev) break;
+				}
+		}
+		
+		PatternCurrent = PatternCurrent->next;
+		if (!PatternCurrent) break;
+}
+
+// remove 1-pattern sequences
+for (i = 0; i < numchn; i++) {
+		if (Channel[i].seqlen == 1) {
+				Channel[i].seqptr = NULL;		    // mem leak
+		}
+}
+
+// find repeating patterns
+for (i = 0; i < numchn; i++) {
+		SequenceCurrent = Channel[i].seqptr;
+		if (!SequenceCurrent || !SequenceCurrent->next) continue;
+		
+		for (;;) {
+				if (SequenceCurrent->pattern == SequenceCurrent->next->pattern) {
+						SequenceCurrent->repeat += SequenceCurrent->next->repeat; // mem leak
+						SequenceCurrent->next = SequenceCurrent->next->next;
+						Channel[i].seqlen--;
+						if (!SequenceCurrent->next) break;
+				} else {
+						SequenceCurrent = SequenceCurrent->next;
+						if (!SequenceCurrent) break;
+						if (!SequenceCurrent->next) break;
+				}
+		}
+}
+
+// REMOVE DUPLICATE PATTERNS ???
+// REMOVE UNUSED PATTERNS ???
+
+
+
+//
+// write new file
+//
+int fptr;
+
+
+
+if (src) fprintf(outfile,"; %s - Source generated by BGM2TMF v2.0 by Ramones\n",argv[2]);
+
+// write start sequences
+
+fptr = 20;
+
+// Write header
+
+if (src) {
+		fprintf(outfile,"; Init Header\n");
+		
+		fprintf(outfile,"\tdb\t%i\n",0xFE);
+
+		fprintf(outfile,"\tdw\t%s\n",argv[2]);
+
+
+		fprintf(outfile,"\tdw\t%s_END\n",argv[2]);
+		fprintf(outfile,"\tdw\t%s\n",argv[2]);
+
+		
+		fprintf(outfile,"%s:\n",argv[2]);
+		fprintf(outfile,"\tdb\t%i\n",flagdrum);
+
+		
+		fprintf(outfile,"; End Header\n");
+
+		
+}
+else {
+		fputc(0xFE, outfile);	
+		fputc((loadAddr) & 0xFF, outfile);	
+		fputc((loadAddr) >> 8, outfile);
+
+		fputc(0, outfile);	
+		fputc(0, outfile);
+
+		fputc(0, outfile);	
+		fputc(0, outfile);
+
+		fputc((flagdrum)&0xFF, outfile);	
+
+
+		
+}
+
+for (i = 0; i < numchn; i++) {
+		if (Channel[i].seqptr) {
+				if (src) {
+						fprintf(outfile,"\tdw\t%s_Seq%0X\n",argv[2],fptr);
+						
+				} else {
+						fputc((fptr + loadAddr) & 0xFF, outfile);
+						fputc((fptr + loadAddr) >> 8, outfile);
+				}
+				Channel[i].newfptr = fptr;
+				fptr += Channel[i].seqlen * 3 + 2;
+		} else {
+				if (src) {
+						fprintf(outfile,"\tdw\t0\n");
+				} else {
+						fputc(0, outfile);
+						fputc(0, outfile);
+				}
+		}
+}
+
+
+if (src) fprintf(outfile,"\n");
+
+// Calculate new pattern fptr's
+PatternCurrent = PatternFirst;
+for (;;) {
+		PatternCurrent->newfptr = fptr;
+		fptr += PatternCurrent->len;
+		
+		PatternCurrent = PatternCurrent->next;
+		if (!PatternCurrent) break;
+}
+
+// Calculate new voice fptr's
+VoiceCurrent = VoiceFirst;
+for (;;) {
+		VoiceCurrent->newfptr = fptr;
+		fptr += VoiceCurrent->len;
+		
+		VoiceCurrent = VoiceCurrent->next;
+		if (!VoiceCurrent) break;
+}
+
+// Write sequences
+for (i = 0; i < numchn; i++) {
+		SequenceCurrent = Channel[i].seqptr;
+		if (!SequenceCurrent) continue;
+		
+		if (src) fprintf(outfile,"%s_Seq%0X:\n\tdw\t",argv[2],Channel[i].newfptr);
+		
+		for (;;) {
+				if (src) fprintf(outfile,"%s_Pat%0X\n\tdb\t%i\n\tdw\t",argv[2],SequenceCurrent->pattern->newfptr, SequenceCurrent->repeat);
+				else {
+						fputc((SequenceCurrent->pattern->newfptr + loadAddr) & 0xFF, outfile);
+						fputc((SequenceCurrent->pattern->newfptr + loadAddr) >> 8, outfile);
+						fputc(SequenceCurrent->repeat, outfile);
+				}
+				
+				SequenceCurrent = SequenceCurrent->next;
+				if (!SequenceCurrent) {
+						if (src) fprintf(outfile,"0\n\n");
+						else {
+								fputc(0,outfile);
+								fputc(0,outfile);
+						}
+						break;
+				}
+		}
+}
+if (src) fprintf(outfile,"\n");
+
+// Write Patterns & insert new voice fptr's
+PatternCurrent = PatternFirst;
+for (;;) {
+
+
+		if ( (src) && (PatternCurrent->type == 1)) {fprintf(outfile,"\n\t; ---- Init Drums pattern ----\n"); }
+
+		if ( (src) && (PatternCurrent->type == 0)) {fprintf(outfile,"\n\t; ---- FM pattern ----\n"); }
+		if ( (src) && (PatternCurrent->type == 2)) {fprintf(outfile,"\n\t; ---- PSG pattern ----\n"); }
+		if ( (src) && (PatternCurrent->type == 3)) {fprintf(outfile,"\n\t; ---- SCC pattern ----\n"); }
+
+
+
+		if (src) fprintf(outfile,"%s_Pat%0X:\n",argv[2],PatternCurrent->newfptr);
+		
+		if (PatternCurrent->type == 1) {
+
+
+				for (i = 0; i < PatternCurrent->len; i++) {
+						if (src) {
+								
+								fprintf(outfile,"\tdb\t%i\n",PatternCurrent->data[i]);
+						} else fputc(PatternCurrent->data[i],outfile);
+				}
+				
+				
+				
+		} else {
+
+
+
+				
+				for (i = 0; i < PatternCurrent->len; ) {
+						in = PatternCurrent->data[i++];
+						
+						if (in < 0x60) {		      // rest/note
+								if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+								in = PatternCurrent->data[i++];
+								if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+						} else {
+								switch (in) {
+										default:
+												if (src) {
+														fprintf(outfile,"\tdb\t%i\n",in);
+														if (in == 0xFF) fprintf(outfile,"\n");
+												} else fputc(in,outfile);
+												break;
+										case 0x83:		      // Instrument change
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												
+												in = PatternCurrent->data[i++];
+												in = in + 256 * PatternCurrent->data[i--];
+												
+												LocateVoice(in);
+												in = VoiceCurrent->newfptr + loadAddr;
+												PatternCurrent->data[i++] = in & 0xFF;
+												PatternCurrent->data[i++] = in >> 8;
+												
+												if (src) fprintf(outfile,"\n\tdw\t%s_Voc%0X\n",argv[2],VoiceCurrent->newfptr);
+												else {
+														fputc(in & 0xFF,outfile);
+														fputc(in >> 8,outfile);
+												}
+														break;
+										case 0x86:		      // Quantize
+										case 0x87:		      // Detune
+										case 0x88:		      // Portamento Speed
+										case 0x89:		      // Vibrato Depth
+										case 0x8B:		      // Vibrato / Portamento Step
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												in = PatternCurrent->data[i++];
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												break;
+										case 0x8C:		      // Register Write
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												in = PatternCurrent->data[i++];
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												in = PatternCurrent->data[i++];
+												if (src) fprintf(outfile,"\tdb\t%i\n",in); else fputc(in,outfile);
+												break;
+								}
+						}
+				}
+		}
+		if (src) fprintf(outfile,"\n");
+		
+		PatternCurrent = PatternCurrent->next;
+		if (!PatternCurrent) break;
+}
+
+// Write Voices
+VoiceCurrent = VoiceFirst;
+for (;;) {
+		if (src) fprintf(outfile,"%s_Voc%0X:\n\tdb\t",argv[2],VoiceCurrent->newfptr);
+		for (i = 0; i < VoiceCurrent->len; i++) {
+				if (src) {
+						fprintf(outfile,"%i",VoiceCurrent->data[i]);
+						if (i < (VoiceCurrent->len - 1)) fprintf(outfile,"\n\tdb\t");
+				} else fputc(VoiceCurrent->data[i],outfile);
+		}
+		if (src) fprintf(outfile,"\n");
+		
+		VoiceCurrent = VoiceCurrent->next;
+		if (!VoiceCurrent) break;
+}
+
+if (src) fprintf(outfile,"%s_END:\n",argv[2]);
+
+
+//fcloseall();
+
+fflush(outfile);
+fclose(outfile);
+fclose(infile);
+
+return 0;
+}
+
+void LocatePattern(int fptr) {
+		
+		if (!PatternFirst) {
+				PatternCurrent = (struct StructPattern *)malloc(sizeof(struct StructPattern));
+				PatternFirst = PatternCurrent;
+				PatternCurrent->next = NULL;
+				return;
+		}
+		
+		PatternCurrent = PatternFirst;
+		for (;;) {
+				if (PatternCurrent->fptr == fptr) return;
+				
+				if (PatternCurrent->next) {
+						PatternCurrent = PatternCurrent->next;
+				} else {
+						PatternCurrent->next = (struct StructPattern *)malloc(sizeof(struct StructPattern));
+						PatternCurrent = PatternCurrent->next;
+						PatternCurrent->next = NULL;
+						return;
+				}
+		}
+}
+
+void LocateVoice(int fptr) {
+		
+		if (!VoiceFirst) {
+				VoiceCurrent = (struct StructVoice *)malloc(sizeof(struct StructVoice));
+				VoiceFirst = VoiceCurrent;
+				VoiceCurrent->next = NULL;
+				return;
+		}
+		
+		VoiceCurrent = VoiceFirst;
+		for (;;) {
+				if (VoiceCurrent->fptr == fptr) return;
+				
+				if (VoiceCurrent->next) {
+						VoiceCurrent = VoiceCurrent->next;
+				} else {
+						VoiceCurrent->next = (struct StructVoice *)malloc(sizeof(struct StructVoice));
+						VoiceCurrent = VoiceCurrent->next;
+						VoiceCurrent->next = NULL;
+						return;
+				}
+		}
+}

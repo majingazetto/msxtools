@@ -1,0 +1,69 @@
+/*
+ *  ScreenDump.c
+ *  AMOSLib
+ *
+ *  Created by Luis Pons on Fri Dec 13 2002.
+ *  Copyright (c) 2002 __MyCompanyName__. All rights reserved.
+ *
+ */
+
+#include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include <AMOSLib.h>
+
+#include "ColorSpaceConv.h"
+#include "Screens.h"
+#include "ScreenDump.h"
+
+// ---------------------------------------------------------------------------
+
+void  ScreenDump ( SCREENDUMP_ARGS *pArgs)
+{
+    int pColorSizes [3];
+    int pSrc, pDst, wColorSrc, wModuloSrc, wModuloDst;
+    int wWidth, wHeight, y; 
+
+    pColorSizes [ OUT_RGB888] = 4;
+    pColorSizes [ OUT_RGB565] = 2;
+    pColorSizes [ OUT_RGB555] = 2;
+
+    if ( pArgs->wDstColorMode == OUT_RGB888)
+    {
+        assert((pArgs->wSrcTags & COLOR_MODE_MASK) == RGB888);
+    }
+    else
+        if ( pArgs->wDstColorMode == OUT_RGB565)
+        {
+            assert(((pArgs->wSrcTags & COLOR_MODE_MASK) == RGB565) || 
+                  ((pArgs->wSrcTags & COLOR_MODE_MASK) == RGB555));
+        }
+    
+    wWidth = pArgs->wSrcWidth;
+    if ( pArgs->wSrcWidth > pArgs->wDstWidth)
+        wWidth = pArgs->wDstWidth;
+    wHeight = pArgs->wSrcHeight;
+    if ( pArgs->wSrcHeight > pArgs->wSrcHeight)
+        wHeight = pArgs->wDstHeight;
+
+    wColorSrc  = pArgs->wSrcTags & COLOR_MODE_MASK;
+    wModuloSrc = pArgs->wSrcWidth * GetColorModePixelSize ( wColorSrc);
+    wModuloDst = pArgs->wDstWidth * pColorSizes [ pArgs->wDstColorMode];
+    pSrc       = (int) pArgs->pSrcAddress;
+    pDst       = (int) pArgs->pDstAddress;
+    
+    if ( pArgs->wSrcHeight < pArgs->wDstHeight)	// Centrar pantalla
+        pDst += ( wModuloDst *  (( pArgs->wDstHeight - pArgs->wSrcHeight) / 2));
+    
+    for ( y=0; y< wHeight; y++)
+    {
+        memcpy ((void *) pDst, (void *) pSrc, wWidth * pColorSizes [ pArgs->wDstColorMode]);
+        pSrc += wModuloSrc;
+        pDst += wModuloDst;
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+

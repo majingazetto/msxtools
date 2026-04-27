@@ -1,0 +1,7 @@
+#!/bin/bash
+rm -Rf cscope.*
+echo "Makefile" > cscope.files
+find . -type f -name '*.[ch]' | sort >> cscope.files
+cscope -b
+gvim $(cat cscope.files) -c 'cs kill 0' -c 'cs add cscope.out'
+
