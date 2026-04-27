@@ -26,7 +26,7 @@ cpu:
 
 dsktool : dsktool.c
 
-	$(CC) $(CFLAGS) -DCPUBYTE=${CPU} $^ -o $(program)
+	$(CC) $(CFLAGS) -DCPUBYTE=$(if $(CPU),$(CPU),0) $^ -o $(program)
 	@echo "$@: $^" > $@.d
 		
 clean:

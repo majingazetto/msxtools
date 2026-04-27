@@ -1,3 +1,4 @@
+
 ; Especiales para lineal y carga de Roms
 NORAML: equ 0 ; No hay Ram para cargar algo de 16k
 RAML16K: equ 1 ; Podemos cargar algo de 16k
