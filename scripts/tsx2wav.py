@@ -392,5 +392,3 @@ if __name__ == "__main__":
             converter.play()
     elif not args.ls:
         parser.print_help()
-       parser.print_help()
-elp()
