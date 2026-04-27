@@ -122,13 +122,22 @@ class TSX2WAV:
     def process_block_10(self, pause_ms, data):
         if not self.phase_changed: self.current_value = -127
         self.phase_changed = False
-        self.write_pulses(3223, 2168)
-        self.write_pulse(667)
-        self.write_pulse(735)
+        
+        # Standard 1200: 2168 pilot, 1710 one, 855 zero
+        # Standard 2400: 1084 pilot, 855 one, 427 zero (half of 1200)
+        # Note: 238 is the ultra-fast 2400 used in 4B. 1200's half is ~1084/427.
+        # But for consistency with 4B's --fast:
+        t_pilot = 1084 if self.fast else 2168
+        t_one = 855 if self.fast else 1710
+        t_zero = 427 if self.fast else 855
+        
+        self.write_pulses(3223, t_pilot)
+        self.write_pulse(667 if not self.fast else 333) # sync1
+        self.write_pulse(735 if not self.fast else 367) # sync2
         for byte in data:
             for i in range(8):
-                if byte & (128 >> i): self.write_pulses(2, 1710)
-                else: self.write_pulses(2, 855)
+                if byte & (128 >> i): self.write_pulses(2, t_one)
+                else: self.write_pulses(2, t_zero)
         if pause_ms > 0: self.write_pulse(2000)
         self.write_silence(100 if self.fast else (pause_ms + self.extra_pause))
 
@@ -154,10 +163,24 @@ class TSX2WAV:
     def process_block_4b(self, data):
         if len(data) < 12: return
         pause_ms = struct.unpack("<H", data[0:2])[0]
-        t_pilot = 238 if self.fast else struct.unpack("<H", data[2:4])[0]
-        n_pilot = 5000 if self.fast else struct.unpack("<H", data[4:6])[0]
-        t_zero = (238*2) if self.fast else struct.unpack("<H", data[6:8])[0]
-        t_one = 238 if self.fast else struct.unpack("<H", data[8:10])[0]
+        t_pilot_orig = struct.unpack("<H", data[2:4])[0]
+        n_pilot_orig = struct.unpack("<H", data[4:6])[0]
+        t_zero_orig = struct.unpack("<H", data[6:8])[0]
+        t_one_orig = struct.unpack("<H", data[8:10])[0]
+
+        # Default to original values
+        t_pilot, n_pilot, t_zero, t_one = t_pilot_orig, n_pilot_orig, t_zero_orig, t_one_orig
+
+        if self.fast:
+            # Detect 1200 baud (approx 476/952/476 T-states) and speed up to 2400 (approx 238/476/238)
+            # We allow some tolerance around 1200 baud standard values
+            is_1200 = (400 < t_one_orig < 600) and (800 < t_zero_orig < 1100)
+            if is_1200:
+                t_pilot = 238
+                n_pilot = 5000  # Standard 2400 pilot length
+                t_zero = 476
+                t_one = 238
+
         bit_cfg, byte_cfg = data[10:12]
         actual_data = data[12:]
 
