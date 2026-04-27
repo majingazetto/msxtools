@@ -18,6 +18,9 @@ Detailed information about the tools in this repository.
 ### Audio
 - **extractwav**: Extracts SCC waveforms from raw data and generates `.mus` and `.wav` files.
 - **tsx2wav.py**: (In scripts) Converts TSX tape images to WAV files with high accuracy.
+  - `--play`: Directly play the audio through system speakers with a real-time signal visualizer.
+  - `--ls`: List all blocks inside the TSX/TZX file with their technical details and descriptions.
+  - `--fast`: Optional 2400 baud conversion for supported loaders.
 - **playwav.py**: (In scripts) Play WAV files with a live oscilloscope visualization.
 
 ### Graphics
