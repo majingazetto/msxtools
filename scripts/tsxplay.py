@@ -9,10 +9,12 @@ import time
 import subprocess
 import tempfile
 
-# --- CONSTANTS (Following openMSX TsxImage.cc) ---
+# --- CONSTANTS (Following openMSX TsxImage.cc and MaxDuino) ---
 TZX_Z80_FREQ = 3500000  # 3.5MHz
 DEFAULT_OUTPUT_FREQ = 96000 
 AMPLITUDE = 126 
+
+CAS_MAGIC = b"\x1f\xa6\xde\xba\xcc\x13\x7d\x74"
 
 # ANSI Colors
 C_RESET = "\033[0m"
@@ -75,7 +77,8 @@ class TSXPlay:
         0x20: "Silence / Pause", 0x21: "Group Start", 0x22: "Group End",
         0x23: "Jump to Block", 0x24: "Loop Start", 0x25: "Loop End",
         0x2B: "Signal Level", 0x30: "Text Description", 0x32: "Archive Info",
-        0x35: "Custom Info Block", 0x4B: "Kansas City Standard (MSX)", 0x5A: "Glue Block"
+        0x35: "Custom Info Block", 0x4B: "Kansas City Standard (MSX)", 0x5A: "Glue Block",
+        0xFE: "MSX CAS Data Block"
     }
 
     ARCHIVE_FIELDS = {
@@ -178,81 +181,149 @@ class TSXPlay:
                 for _ in range(n_1 if v_stop else n_0): self.write_pulse(t_1 if v_stop else t_0)
         self.write_silence(pause_ms + self.extra_pause)
 
-    def list_blocks(self, tsx_path):
-        print(f"\n{C_BOLD}TSX/TZX Block List for:{C_RESET} {C_YELLOW}{os.path.basename(tsx_path)}{C_RESET}")
+    def process_msx_bytes(self, data, fast_override=False):
+        # MSX Standard: 1 start bit (0), 8 data bits (LSB first), 2 stop bits (1)
+        # 1200 baud: '1' is 2400Hz (4 pulses of 364), '0' is 1200Hz (2 pulses of 729)
+        # NOTE: openMSX/Maxduino use T-states 364 and 729 for 2400/1200 Hz at 3.5MHz
+        t_1, t_0 = 364, 729
+        if self.fast or fast_override:
+            t_1, t_0 = 182, 364 # 2400 baud: '1' is 4800Hz, '0' is 2400Hz
+            
+        for byte in data:
+            # Start bit (0)
+            for _ in range(2): self.write_pulse(t_0)
+            # 8 Data bits (LSB first)
+            for i in range(8):
+                bit = (byte >> i) & 1
+                if bit:
+                    for _ in range(4): self.write_pulse(t_1)
+                else:
+                    for _ in range(2): self.write_pulse(t_0)
+            # 2 Stop bits (1)
+            for _ in range(8): self.write_pulse(t_1) # 2 bits * 4 pulses = 8 pulses
+
+    def process_cas_block(self, data):
+        # Determine if it's a long or short pilot based on the 10-byte prefix
+        # Long: 8063 pulses (~3.3s at 1200 baud), Short: 3223 pulses (~1.3s)
+        # MSX Header blocks use long pilots. Data blocks use short pilots.
+        is_header = False
+        if len(data) >= 10:
+            if data[0:10] in (b"\xd0"*10, b"\xd3"*10, b"\xea"*10): is_header = True
+            
+        n_p = 8063 if is_header else 3223
+        t_p = 364 if not self.fast else 182
+        s1, s2 = 333, 367
+        if self.fast: s1 //= 2; s2 //= 2
+        
+        if not self.phase_changed: self.current_value = 127
+        self.phase_changed = False
+        
+        self.write_pulses(n_p, t_p)
+        self.write_pulse(s1); self.write_pulse(s2)
+        self.process_msx_bytes(data)
+        self.write_silence(1000)
+
+    def list_blocks(self, file_path):
+        is_cas = file_path.lower().endswith(".cas")
+        print(f"\n{C_BOLD}{'CAS' if is_cas else 'TSX/TZX'} Block List for:{C_RESET} {C_YELLOW}{os.path.basename(file_path)}{C_RESET}")
         print("-" * 60)
-        with open(tsx_path, "rb") as f:
-            sig = f.read(10)
-            if sig[0:8] != b"ZXTape!\x1a": return
-            while True:
-                pos = f.tell()
-                bid_raw = f.read(1)
-                if not bid_raw: break
-                bid = bid_raw[0]
-                name = self.BLOCK_NAMES.get(bid, f"Unknown Block ({hex(bid)})")
-                print(f"[{C_GREEN}{hex(pos)}{C_RESET}] ID {C_YELLOW}{hex(bid)}{C_RESET}: {C_CYAN}{name}{C_RESET}")
-                if bid == 0x10: f.read(struct.unpack("<HH", f.read(4))[1])
-                elif bid == 0x11: f.read(struct.unpack("<I", f.read(0x12)[0x0F:0x12] + b"\x00")[0])
-                elif bid == 0x12: f.read(4)
-                elif bid == 0x13: f.read(1 + f.read(1)[0] * 2)
-                elif bid == 0x14: f.read(7 + struct.unpack("<I", f.read(3) + b"\x00")[0])
-                elif bid in (0x20, 0x23, 0x24): f.read(2)
-                elif bid in (0x21, 0x30): f.read(f.read(1)[0])
-                elif bid == 0x2B: f.read(5)
-                elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
-                elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
-                elif bid == 0x4B: f.read(struct.unpack("<I", f.read(4))[0])
-                elif bid == 0x5A: f.read(9)
-                else: break
+        with open(file_path, "rb") as f:
+            if is_cas:
+                data = f.read()
+                ptr = 0
+                while True:
+                    idx = data.find(CAS_MAGIC, ptr)
+                    if idx == -1: break
+                    pos = idx
+                    print(f"[{C_GREEN}{hex(pos)}{C_RESET}] ID {C_YELLOW}0xFE{C_RESET}: {C_CYAN}MSX CAS Data Block{C_RESET}")
+                    ptr = idx + 8
+            else:
+                sig = f.read(10)
+                if sig[0:8] != b"ZXTape!\x1a": return
+                while True:
+                    pos = f.tell()
+                    bid_raw = f.read(1)
+                    if not bid_raw: break
+                    bid = bid_raw[0]
+                    name = self.BLOCK_NAMES.get(bid, f"Unknown Block ({hex(bid)})")
+                    print(f"[{C_GREEN}{hex(pos)}{C_RESET}] ID {C_YELLOW}{hex(bid)}{C_RESET}: {C_CYAN}{name}{C_RESET}")
+                    if bid == 0x10: f.read(struct.unpack("<HH", f.read(4))[1])
+                    elif bid == 0x11: f.read(struct.unpack("<I", f.read(0x12)[0x0F:0x12] + b"\x00")[0])
+                    elif bid == 0x12: f.read(4)
+                    elif bid == 0x13: f.read(1 + f.read(1)[0] * 2)
+                    elif bid == 0x14: f.read(7 + struct.unpack("<I", f.read(3) + b"\x00")[0])
+                    elif bid in (0x20, 0x23, 0x24): f.read(2)
+                    elif bid in (0x21, 0x30): f.read(f.read(1)[0])
+                    elif bid == 0x2B: f.read(5)
+                    elif bid == 0x32: f.read(struct.unpack("<H", f.read(2))[0])
+                    elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
+                    elif bid == 0x4B: f.read(struct.unpack("<I", f.read(4))[0])
+                    elif bid == 0x5A: f.read(9)
+                    else: break
         print("-" * 60 + "\n")
 
-    def convert(self, tsx_path, wav_path=None, lead_in=0, silent=False):
-        file_size = os.path.getsize(tsx_path)
-        effective_lead_in = lead_in if lead_in > 0 else (1000 if self.fast else 0)
+    def convert(self, file_path, wav_path=None, lead_in=0, silent=False):
+        file_size = os.path.getsize(file_path)
+        effective_lead_in = lead_in if lead_in > 0 else (1000 if self.fast else 500)
         if effective_lead_in > 0: self.block_map.append((0, "Silence (Lead-in)")); self.write_silence(effective_lead_in)
-        with open(tsx_path, "rb") as f:
-            sig = f.read(10)
-            if sig[0:8] != b"ZXTape!\x1a": return
-            while True:
-                pos = f.tell()
-                if not silent: print_progress(pos, file_size, prefix='Converting:', suffix=f'Pos {hex(pos)}')
-                bid_raw = f.read(1)
-                if not bid_raw: break
-                bid = bid_raw[0]
-                b_name = self.BLOCK_NAMES.get(bid, f"Block {hex(bid)}")
-                current_info = b_name
-                if bid == 0x10:
-                    pause, length = struct.unpack("<HH", f.read(4)); data = f.read(length); msx = self.get_msx_info(data)
-                    if msx: current_info = f"MSX {msx}"
-                    self.block_map.append((len(self.samples), current_info)); self.process_block_10(pause, data)
-                elif bid == 0x4B:
-                    blen = struct.unpack("<I", f.read(4))[0]; data = f.read(blen); msx = self.get_msx_info(data[12:])
-                    if msx: current_info = f"MSX {msx}"
-                    self.block_map.append((len(self.samples), current_info)); self.process_block_4b(data)
-                elif bid == 0x30:
-                    l = f.read(1)[0]; txt = f.read(l).decode('ascii', 'ignore').strip()
-                    if txt: self.metadata["Description"] = txt
-                elif bid == 0x32:
-                    blen = struct.unpack("<H", f.read(2))[0]; bdata = f.read(blen)
-                    num_strings = bdata[0]; ptr = 1
-                    for _ in range(num_strings):
-                        if ptr >= blen: break
-                        tid = bdata[ptr]; slen = bdata[ptr+1]; ptr += 2
-                        stxt = bdata[ptr:ptr+slen].decode('ascii', 'ignore').strip()
-                        ptr += slen
-                        fname = self.ARCHIVE_FIELDS.get(tid, f"Field {hex(tid)}")
-                        if stxt: self.metadata[fname] = stxt
-                else:
+        
+        if file_path.lower().endswith(".cas"):
+            with open(file_path, "rb") as f:
+                content = f.read()
+                blocks = content.split(CAS_MAGIC)
+                for i, block in enumerate(blocks):
+                    if not block: continue
+                    if not silent: print_progress(i, len(blocks), prefix='Converting CAS:', suffix=f'Block {i}')
+                    msx = self.get_msx_info(block)
+                    current_info = f"MSX {msx}" if msx else "CAS Data Block"
                     self.block_map.append((len(self.samples), current_info))
-                    if bid == 0x11: hdr = f.read(0x12); dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]; self.process_block_11(hdr + f.read(dlen))
-                    elif bid == 0x12: t, n = struct.unpack("<HH", f.read(4)); self.write_pulses(n, t)
-                    elif bid == 0x13: n = f.read(1)[0]; [self.write_pulse(struct.unpack("<H", f.read(2))[0]) for _ in range(n)]
-                    elif bid == 0x20: self.write_silence(struct.unpack("<H", f.read(2))[0])
-                    elif bid == 0x2B: self.phase_changed = True; self.current_value = -127 if struct.unpack("<I", f.read(4))[0] == 0 else 127; f.read(1)
-                    elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
-                    elif bid in (0x5A, 0x21, 0x30, 0x22): [f.read(9) if bid==0x5A else f.read(f.read(1)[0]) if bid in (0x21, 0x30) else None]
-                    else: break
-            if not silent: print_progress(file_size, file_size, prefix='Converting:', suffix='Complete')
+                    self.process_cas_block(block)
+                if not silent: print_progress(len(blocks), len(blocks), prefix='Converting CAS:', suffix='Complete')
+        else:
+            with open(file_path, "rb") as f:
+                sig = f.read(10)
+                if sig[0:8] != b"ZXTape!\x1a": return
+                while True:
+                    pos = f.tell()
+                    if not silent: print_progress(pos, file_size, prefix='Converting TSX:', suffix=f'Pos {hex(pos)}')
+                    bid_raw = f.read(1)
+                    if not bid_raw: break
+                    bid = bid_raw[0]
+                    b_name = self.BLOCK_NAMES.get(bid, f"Block {hex(bid)}")
+                    current_info = b_name
+                    if bid == 0x10:
+                        pause, length = struct.unpack("<HH", f.read(4)); data = f.read(length); msx = self.get_msx_info(data)
+                        if msx: current_info = f"MSX {msx}"
+                        self.block_map.append((len(self.samples), current_info)); self.process_block_10(pause, data)
+                    elif bid == 0x4B:
+                        blen = struct.unpack("<I", f.read(4))[0]; data = f.read(blen); msx = self.get_msx_info(data[12:])
+                        if msx: current_info = f"MSX {msx}"
+                        self.block_map.append((len(self.samples), current_info)); self.process_block_4b(data)
+                    elif bid == 0x30:
+                        l = f.read(1)[0]; txt = f.read(l).decode('ascii', 'ignore').strip()
+                        if txt: self.metadata["Description"] = txt
+                    elif bid == 0x32:
+                        blen = struct.unpack("<H", f.read(2))[0]; bdata = f.read(blen)
+                        num_strings = bdata[0]; ptr = 1
+                        for _ in range(num_strings):
+                            if ptr >= blen: break
+                            tid = bdata[ptr]; slen = bdata[ptr+1]; ptr += 2
+                            stxt = bdata[ptr:ptr+slen].decode('ascii', 'ignore').strip()
+                            ptr += slen
+                            fname = self.ARCHIVE_FIELDS.get(tid, f"Field {hex(tid)}")
+                            if stxt: self.metadata[fname] = stxt
+                    else:
+                        self.block_map.append((len(self.samples), current_info))
+                        if bid == 0x11: hdr = f.read(0x12); dlen = struct.unpack("<I", hdr[0x0F:0x12] + b"\x00")[0]; self.process_block_11(hdr + f.read(dlen))
+                        elif bid == 0x12: t, n = struct.unpack("<HH", f.read(4)); self.write_pulses(n, t)
+                        elif bid == 0x13: n = f.read(1)[0]; [self.write_pulse(struct.unpack("<H", f.read(2))[0]) for _ in range(n)]
+                        elif bid == 0x20: self.write_silence(struct.unpack("<H", f.read(2))[0])
+                        elif bid == 0x2B: self.phase_changed = True; self.current_value = -127 if struct.unpack("<I", f.read(4))[0] == 0 else 127; f.read(1)
+                        elif bid == 0x35: f.read(16); f.read(struct.unpack("<I", f.read(4))[0])
+                        elif bid in (0x5A, 0x21, 0x30, 0x22): [f.read(9) if bid==0x5A else f.read(f.read(1)[0]) if bid in (0x21, 0x30) else None]
+                        else: break
+                if not silent: print_progress(file_size, file_size, prefix='Converting TSX:', suffix='Complete')
+        
         if wav_path:
             with wave.open(wav_path, "wb") as wf: wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate); wf.writeframes(self.samples)
 
@@ -303,8 +374,8 @@ class TSXPlay:
             except: pass
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TSX/TZX Player and Converter")
-    parser.add_argument("input", help="Input TSX/TZX file")
+    parser = argparse.ArgumentParser(description="TSX/TZX/CAS Player and Converter")
+    parser.add_argument("input", help="Input TSX/TZX/CAS file")
     parser.add_argument("-w", "--wav", dest="output", help="Output WAV file (instead of playing)")
     parser.add_argument("--ls", action="store_true", help="List blocks and info")
     parser.add_argument("--play", action="store_true", help="Play audio (default behavior)")
