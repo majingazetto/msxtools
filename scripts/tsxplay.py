@@ -68,7 +68,7 @@ def print_play_progress(current, total, wave_gfx, block_info, wave_color, length
     sys.stdout.write('\033[F') 
     sys.stdout.flush()
 
-class TSX2WAV:
+class TSXPlay:
     BLOCK_NAMES = {
         0x10: "Standard Speed Data", 0x11: "Turbo Speed Data", 0x12: "Pure Tone",
         0x13: "Pulse Sequence", 0x14: "Pure Data", 0x15: "Direct Recording",
@@ -303,15 +303,26 @@ class TSX2WAV:
             except: pass
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TSX to WAV converter and player")
-    parser.add_argument("input", help="Input TSX/TZX file"); parser.add_argument("output", nargs="?", help="Output WAV file")
-    parser.add_argument("--ls", action="store_true", help="List blocks and info"); parser.add_argument("--play", action="store_true", help="Play audio directly")
-    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast loading"); parser.add_argument("--invert", action="store_true", help="Invert phase")
-    parser.add_argument("--extra-pause", type=int, default=0, help="Extra pause in ms"); parser.add_argument("--rate", type=int, default=96000, help="Sample rate")
+    parser = argparse.ArgumentParser(description="TSX/TZX Player and Converter")
+    parser.add_argument("input", help="Input TSX/TZX file")
+    parser.add_argument("-w", "--wav", dest="output", help="Output WAV file (instead of playing)")
+    parser.add_argument("--ls", action="store_true", help="List blocks and info")
+    parser.add_argument("--play", action="store_true", help="Play audio (default behavior)")
+    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast loading")
+    parser.add_argument("--invert", action="store_true", help="Invert phase")
+    parser.add_argument("--extra-pause", type=int, default=0, help="Extra pause in ms")
+    parser.add_argument("--rate", type=int, default=96000, help="Sample rate")
     args = parser.parse_args()
-    converter = TSX2WAV(sample_rate=args.rate, fast=args.fast, invert=args.invert, extra_pause=args.extra_pause)
-    if args.ls: converter.list_blocks(args.input)
-    if args.output or args.play:
-        converter.convert(args.input, args.output, silent=(args.play and not args.output))
-        if args.play: converter.play()
-    elif not args.ls: parser.print_help()
+    
+    player = TSXPlay(sample_rate=args.rate, fast=args.fast, invert=args.invert, extra_pause=args.extra_pause)
+    
+    if args.ls:
+        player.list_blocks(args.input)
+    
+    # If output is specified, we convert to WAV
+    if args.output:
+        player.convert(args.input, args.output)
+    elif not args.ls:
+        # Default behavior: convert to memory and play
+        player.convert(args.input, None, silent=True)
+        player.play()
