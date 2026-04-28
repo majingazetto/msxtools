@@ -26,6 +26,30 @@ C_RED = "\033[31m"
 C_BLUE = "\033[34m"
 C_MAGENTA = "\033[35m"
 
+class ColorfulFormatter(argparse.HelpFormatter):
+    def _format_action_invocation(self, action):
+        if not action.option_strings:
+            metavar, = self._metavar_formatter(action, action.dest)(1)
+            return f"{C_GREEN}{metavar}{C_RESET}"
+        else:
+            parts = []
+            if action.nargs == 0:
+                parts.extend([f"{C_CYAN}{s}{C_RESET}" for s in action.option_strings])
+            else:
+                default = action.dest.upper()
+                args_string = self._format_args(action, default)
+                for option_string in action.option_strings:
+                    parts.append(f"{C_CYAN}{option_string}{C_RESET} {C_YELLOW}{args_string}{C_RESET}")
+            return ", ".join(parts)
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        if prefix is None:
+            prefix = f"{C_BOLD}usage:{C_RESET} "
+        return super()._format_usage(usage, actions, groups, prefix)
+
+    def start_section(self, heading):
+        super().start_section(f"{C_BOLD}{C_MAGENTA}{heading}{C_RESET}")
+
 def print_progress(current, total, prefix='', suffix='', length=50, fill='█'):
     if total <= 0: return
     current = max(0, min(current, total))
@@ -444,7 +468,10 @@ class TSXPlay:
             except: pass
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TSX/TZX/CAS Player and Converter")
+    parser = argparse.ArgumentParser(
+        description="TSX/TZX/CAS Player and Converter",
+        formatter_class=ColorfulFormatter
+    )
     parser.add_argument("input", help="Input TSX/TZX/CAS file")
     parser.add_argument("-w", "--wav", dest="output", help="Output WAV file")
     parser.add_argument("-t", "--tsx", dest="tsx_output", help="Output TSX file")
@@ -462,6 +489,10 @@ if __name__ == "__main__":
     meta_group.add_argument("--year", help="Release year")
     meta_group.add_argument("--desc", help="Text description")
     
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+
     args = parser.parse_args()
     
     player = TSXPlay(sample_rate=args.rate, fast=args.fast, invert=args.invert)
