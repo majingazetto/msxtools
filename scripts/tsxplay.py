@@ -92,9 +92,11 @@ class TSXPlay:
         self.current_value, self.phase_changed, self.samples, self.accum_samples = 127, False, bytearray(), 0.0
         self.detected_type, self.block_map = "UNKNOWN", []
         self.metadata = {} # Metadata found in the TSX
+        self.file_path = None
+        self.raw_blocks = [] # For CAS to TSX conversion
 
     def get_msx_info(self, data):
-        if len(data) < 16: return None
+        if not data or len(data) < 16: return None
         h_bin, h_bas, h_asc = b"\xd0"*10, b"\xd3"*10, b"\xea"*10
         m_type = ""
         if data[0:10] == h_bin: m_type = "BINARY"
@@ -181,16 +183,15 @@ class TSXPlay:
                 for _ in range(n_1 if v_stop else n_0): self.write_pulse(t_1 if v_stop else t_0)
         self.write_silence(pause_ms + self.extra_pause)
 
-    def process_msx_bytes(self, data, fast_override=False):
+    def process_msx_bytes(self, data):
         # MSX Standard: 1 start bit (0), 8 data bits (LSB first), 2 stop bits (1)
-        # 1200 baud: '1' is 2400Hz (4 pulses of 364), '0' is 1200Hz (2 pulses of 729)
-        # NOTE: openMSX/Maxduino use T-states 364 and 729 for 2400/1200 Hz at 3.5MHz
-        t_1, t_0 = 364, 729
-        if self.fast or fast_override:
-            t_1, t_0 = 182, 364 # 2400 baud: '1' is 4800Hz, '0' is 2400Hz
+        # 1200 baud: '1' is 2400Hz (half-cycle 729), '0' is 1200Hz (half-cycle 1458)
+        t_1, t_0 = 729, 1458
+        if self.fast:
+            t_1, t_0 = 364, 729 # 2400 baud
             
         for byte in data:
-            # Start bit (0)
+            # Start bit (0): 2 pulses of t_0
             for _ in range(2): self.write_pulse(t_0)
             # 8 Data bits (LSB first)
             for i in range(8):
@@ -199,20 +200,18 @@ class TSXPlay:
                     for _ in range(4): self.write_pulse(t_1)
                 else:
                     for _ in range(2): self.write_pulse(t_0)
-            # 2 Stop bits (1)
-            for _ in range(8): self.write_pulse(t_1) # 2 bits * 4 pulses = 8 pulses
+            # 2 Stop bits (1): 2 * 4 pulses = 8 pulses of t_1
+            for _ in range(8): self.write_pulse(t_1)
 
     def process_cas_block(self, data):
-        # Determine if it's a long or short pilot based on the 10-byte prefix
-        # Long: 8063 pulses (~3.3s at 1200 baud), Short: 3223 pulses (~1.3s)
-        # MSX Header blocks use long pilots. Data blocks use short pilots.
+        # Long: 8063 pulses, Short: 3223 pulses
         is_header = False
         if len(data) >= 10:
             if data[0:10] in (b"\xd0"*10, b"\xd3"*10, b"\xea"*10): is_header = True
             
         n_p = 8063 if is_header else 3223
-        t_p = 364 if not self.fast else 182
-        s1, s2 = 333, 367
+        t_p = 729 if not self.fast else 364
+        s1, s2 = 333, 367 # Sync pulses
         if self.fast: s1 //= 2; s2 //= 2
         
         if not self.phase_changed: self.current_value = 127
@@ -222,6 +221,64 @@ class TSXPlay:
         self.write_pulse(s1); self.write_pulse(s2)
         self.process_msx_bytes(data)
         self.write_silence(1000)
+
+    def save_tsx(self, tsx_path, metadata=None):
+        with open(tsx_path, "wb") as f:
+            f.write(b"ZXTape!\x1a\x01\x15") # Header TZX 1.21
+            
+            # --- METADATA BLOCKS ---
+            if metadata:
+                # 1. Text Description (0x30)
+                if metadata.get("Description"):
+                    desc = metadata["Description"].encode('ascii', 'ignore')[:255]
+                    f.write(b"\x30")
+                    f.write(bytes([len(desc)]))
+                    f.write(desc)
+                
+                # 2. Archive Info (0x32)
+                archive_data = bytearray()
+                fields = { 0x00: "Title", 0x01: "Publisher", 0x02: "Author", 0x03: "Release Date", 0xFF: "Comment" }
+                field_count = 0
+                for tid, key in fields.items():
+                    val = metadata.get(key)
+                    if val:
+                        txt = val.encode('ascii', 'ignore')[:255]
+                        archive_data.extend(bytes([tid, len(txt)]))
+                        archive_data.extend(txt)
+                        field_count += 1
+                
+                if field_count > 0:
+                    f.write(b"\x32")
+                    f.write(struct.pack("<H", len(archive_data) + 1))
+                    f.write(bytes([field_count]))
+                    f.write(archive_data)
+
+            # --- DATA BLOCKS ---
+            for block_data in self.raw_blocks:
+                is_header = False
+                if len(block_data) >= 10 and block_data[0:10] in (b"\xd0"*10, b"\xd3"*10, b"\xea"*10):
+                    is_header = True
+                
+                n_p = 8063 if is_header else 3223
+                t_p, t_0, t_1 = (364, 729, 364) if self.fast else (729, 1458, 729)
+                s1, s2 = (166, 183) if self.fast else (333, 367)
+                
+                dlen = len(block_data)
+                blen = 21 + dlen
+                f.write(b"\x4B")
+                f.write(struct.pack("<I", blen))
+                f.write(struct.pack("<H", 1000)) # Pause 1s
+                f.write(struct.pack("<H", t_p))
+                f.write(struct.pack("<H", n_p))
+                f.write(struct.pack("<H", s1))
+                f.write(struct.pack("<H", s2))
+                f.write(struct.pack("<H", t_0))
+                f.write(struct.pack("<H", t_1))
+                # MSX Specific: BitCfg=0x24 (2/4 pulses), ByteCfg=0x54 (1 start, 2 stop, LSB)
+                f.write(b"\x24\x54\x08") # Offset 14, 15, 16
+                f.write(struct.pack("<I", dlen))
+                f.write(block_data)
+        print(f"\n {C_GREEN}[√] TSX file saved to:{C_RESET} {C_YELLOW}{tsx_path}{C_RESET}")
 
     def list_blocks(self, file_path):
         is_cas = file_path.lower().endswith(".cas")
@@ -262,10 +319,12 @@ class TSXPlay:
                     else: break
         print("-" * 60 + "\n")
 
-    def convert(self, file_path, wav_path=None, lead_in=0, silent=False):
+    def convert(self, file_path, wav_path=None, tsx_path=None, lead_in=0, silent=False, metadata=None):
+        self.file_path = file_path
         file_size = os.path.getsize(file_path)
         effective_lead_in = lead_in if lead_in > 0 else (1000 if self.fast else 500)
-        if effective_lead_in > 0: self.block_map.append((0, "Silence (Lead-in)")); self.write_silence(effective_lead_in)
+        if wav_path or not tsx_path: # Lead-in for audio
+            if effective_lead_in > 0: self.block_map.append((0, "Silence (Lead-in)")); self.write_silence(effective_lead_in)
         
         if file_path.lower().endswith(".cas"):
             with open(file_path, "rb") as f:
@@ -273,12 +332,13 @@ class TSXPlay:
                 blocks = content.split(CAS_MAGIC)
                 for i, block in enumerate(blocks):
                     if not block: continue
-                    if not silent: print_progress(i, len(blocks), prefix='Converting CAS:', suffix=f'Block {i}')
+                    if not silent: print_progress(i, len(blocks), prefix='Processing CAS:', suffix=f'Block {i}')
                     msx = self.get_msx_info(block)
                     current_info = f"MSX {msx}" if msx else "CAS Data Block"
                     self.block_map.append((len(self.samples), current_info))
-                    self.process_cas_block(block)
-                if not silent: print_progress(len(blocks), len(blocks), prefix='Converting CAS:', suffix='Complete')
+                    self.raw_blocks.append(block)
+                    if not tsx_path or wav_path: self.process_cas_block(block)
+                if not silent: print_progress(len(blocks), len(blocks), prefix='Processing CAS:', suffix='Complete')
         else:
             with open(file_path, "rb") as f:
                 sig = f.read(10)
@@ -324,6 +384,7 @@ class TSXPlay:
                         else: break
                 if not silent: print_progress(file_size, file_size, prefix='Converting TSX:', suffix='Complete')
         
+        if tsx_path and self.raw_blocks: self.save_tsx(tsx_path, metadata)
         if wav_path:
             with wave.open(wav_path, "wb") as wf: wf.setnchannels(1); wf.setsampwidth(1); wf.setframerate(self.sample_rate); wf.writeframes(self.samples)
 
@@ -337,11 +398,15 @@ class TSXPlay:
         
         print("\n" + f"{C_YELLOW}═{C_RESET}"*70 + f"\n {C_BOLD}{C_CYAN}MSX TAPE PLAYER{C_RESET}\n" + f"{C_YELLOW}═{C_RESET}"*70)
         
+        # Display Filename
+        print(f" {C_BOLD}FILE        :{C_RESET} {C_MAGENTA}{os.path.basename(self.file_path)}{C_RESET}")
+
         # Display Metadata if available
         if self.metadata:
             for k, v in self.metadata.items():
                 print(f" {C_BOLD}{k:<12}:{C_RESET} {C_YELLOW}{v}{C_RESET}")
-            print(f"{C_YELLOW}─{C_RESET}"*70)
+        
+        print(f"{C_YELLOW}─{C_RESET}"*70)
             
         print(f" {C_BOLD}ENTRY TYPE  :{C_RESET} {C_GREEN}{self.detected_type}{C_RESET}\n {C_BOLD}MSX COMMAND :{C_RESET} {C_CYAN}{cmd_text}{C_RESET}\n" + f"{C_YELLOW}═{C_RESET}"*70 + "\n\n")
         
@@ -376,24 +441,42 @@ class TSXPlay:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TSX/TZX/CAS Player and Converter")
     parser.add_argument("input", help="Input TSX/TZX/CAS file")
-    parser.add_argument("-w", "--wav", dest="output", help="Output WAV file (instead of playing)")
+    parser.add_argument("-w", "--wav", dest="output", help="Output WAV file")
+    parser.add_argument("-t", "--tsx", dest="tsx_output", help="Output TSX file")
     parser.add_argument("--ls", action="store_true", help="List blocks and info")
-    parser.add_argument("--play", action="store_true", help="Play audio (default behavior)")
-    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast loading")
+    parser.add_argument("--play", action="store_true", help="Play audio (default)")
+    parser.add_argument("--fast", action="store_true", help="Use 2400 baud fast mode")
     parser.add_argument("--invert", action="store_true", help="Invert phase")
-    parser.add_argument("--extra-pause", type=int, default=0, help="Extra pause in ms")
     parser.add_argument("--rate", type=int, default=96000, help="Sample rate")
+    
+    # Metadata arguments
+    meta_group = parser.add_argument_group("Metadata (for TSX output)")
+    meta_group.add_argument("--title", help="Game title")
+    meta_group.add_argument("--author", help="Author name")
+    meta_group.add_argument("--publisher", help="Publisher name")
+    meta_group.add_argument("--year", help="Release year")
+    meta_group.add_argument("--desc", help="Text description")
+    
     args = parser.parse_args()
     
-    player = TSXPlay(sample_rate=args.rate, fast=args.fast, invert=args.invert, extra_pause=args.extra_pause)
+    player = TSXPlay(sample_rate=args.rate, fast=args.fast, invert=args.invert)
     
     if args.ls:
         player.list_blocks(args.input)
     
-    # If output is specified, we convert to WAV
-    if args.output:
-        player.convert(args.input, args.output)
+    # Metadata dictionary for save_tsx
+    metadata = {
+        "Title": args.title,
+        "Author": args.author,
+        "Publisher": args.publisher,
+        "Release Date": args.year,
+        "Description": args.desc
+    }
+    
+    if args.tsx_output:
+        player.convert(args.input, tsx_path=args.tsx_output, metadata=metadata)
+    elif args.output:
+        player.convert(args.input, wav_path=args.output)
     elif not args.ls:
-        # Default behavior: convert to memory and play
         player.convert(args.input, None, silent=True)
         player.play()
