@@ -412,7 +412,12 @@ class TSXPlay:
         
         duration = len(self.samples) / float(self.sample_rate)
         try:
-            process = subprocess.Popen(["aplay", "-q", "-c", "1", temp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if sys.platform == "darwin":
+                play_cmd = ["afplay", temp_name]
+            else:
+                play_cmd = ["aplay", "-q", "-c", "1", temp_name]
+                
+            process = subprocess.Popen(play_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             start_time = time.time()
             while process.poll() is None:
                 elapsed = time.time() - start_time
