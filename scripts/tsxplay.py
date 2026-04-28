@@ -239,7 +239,7 @@ class TSXPlay:
                     ptr = idx + 8
             else:
                 sig = f.read(10)
-                if sig[0:8] != b"ZXTape!\x1a": return
+                if sig[0:8] != b"ZXTape!\x1a" and sig[0:8] != b"TSX Tape": return
                 while True:
                     pos = f.tell()
                     bid_raw = f.read(1)
@@ -282,7 +282,7 @@ class TSXPlay:
         else:
             with open(file_path, "rb") as f:
                 sig = f.read(10)
-                if sig[0:8] != b"ZXTape!\x1a": return
+                if sig[0:8] != b"ZXTape!\x1a" and sig[0:8] != b"TSX Tape": return
                 while True:
                     pos = f.tell()
                     if not silent: print_progress(pos, file_size, prefix='Converting TSX:', suffix=f'Pos {hex(pos)}')
