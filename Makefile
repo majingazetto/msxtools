@@ -5,7 +5,7 @@ PATTOOLS = sr52spr sr52map sr52pat mt82map
 CUTTERTOOLS = cutter cuttersize
 TARTOOLS = tar8k tarbin tarbinmax
 MUSTOOLS = extractwav
-DSKTOOLS = dskutils dsktool
+DSKTOOLS = dskutils dsktool dsk2rom
 MISCTOOLS = bgm2tmf freepage sms2rom ViewSRC
 
 TARGETS = $(PATTOOLS) $(CUTTERTOOLS) $(TARTOOLS) $(MUSTOOLS) $(DSKTOOLS) $(MISCTOOLS)

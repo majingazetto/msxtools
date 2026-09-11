@@ -25,4 +25,7 @@ src/tarbinmax/tarbinmax
 src/extractwav/extractwav
 src/sms2rom/sms2rom
 src/dsktool/dsktool
+src/dsk2rom/dsk2rom
+src/dsk2rom/bin2h
+src/dsk2rom/dsk2rom.h
 src/ViewSRC/viewsrc

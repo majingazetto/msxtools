@@ -12,6 +12,7 @@ Detailed information about the tools in this repository.
 
 ### Disk & ROM Utilities
 - **dsktool**: Versatile MSX disk image manager. Supports List, Extract, Add, and Delete commands on 720KB .DSK files.
+- **dsk2rom**: Converts MSX floppy disk images (`.dsk`) into cartridge ROM images (`.rom`) by injecting a custom DiskROM kernel. Supports Pletter compression (`-c 0..2`), mapper selection (Konami SCC default or ASCII8 via `-a`), safe mode (`-s`), 50Hz/60Hz PAL/NTSC forcing (`-5`/`-6`), MSX1 palette mode (`-p`), non-exclusive mode (`-d`), standard ROM padding (`-f`), and ROM-to-DSK reversion (`-r`).
 - **wrdsk / rddsk**: Utilities to write/read files to/from MSX disk images.
 - **sms2rom**: Tool related to SEGA Master System to MSX conversions.
 
