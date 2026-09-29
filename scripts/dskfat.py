@@ -7,7 +7,9 @@ disk can be laid out the way it is used: the program in A:\\TOOLS on the PATH,
 the documents somewhere else.
 
     dskfat.py IMAGE mkdir DIR                 create DIR (and its parents)
-    dskfat.py IMAGE add DIR FILE [NAME] ...   copy host FILEs into DIR
+    dskfat.py IMAGE add [--date=Y-M-DTH:M] DIR FILE[=NAME] ...
+                                              copy host FILEs into DIR
+    dskfat.py IMAGE attr PATH [+|-][rhsa]...  set or clear attribute bits
     dskfat.py IMAGE ls [DIR]                  list DIR (default: the root)
     dskfat.py IMAGE get PATH [HOSTFILE]       extract one file
 
@@ -138,8 +140,10 @@ class Fat12(object):
             bytes(self.csize)
         return self.coff(new)
 
+    stamp = None                    # datetime for new entries; None = now
+
     def write_entry(self, off, name83, attr, clus, size):
-        now = datetime.datetime.now()
+        now = self.stamp or datetime.datetime.now()
         t = (now.hour << 11) | (now.minute << 5) | (now.second // 2)
         d = ((max(now.year, 1980) - 1980) << 9) | (now.month << 5) | now.day
         e = bytearray(ENTRY)
@@ -232,12 +236,29 @@ def main(argv):
         fs.resolve(args[0], create=True)
         fs.save()
     elif cmd == 'add' and len(args) >= 2:
+        if args[0].startswith('--date='):
+            fs.stamp = datetime.datetime.fromisoformat(args[0][7:])
+            args = args[1:]
         clus = fs.resolve(args[0], create=True)
         for spec in args[1:]:
             host, _, name = spec.partition('=')
             with open(host, 'rb') as fh:
                 data = fh.read()
             fs.add(clus, to83(name or os.path.basename(host)), data)
+        fs.save()
+    elif cmd == 'attr' and len(args) >= 2:
+        parts = split_path(args[0])
+        clus = fs.resolve('\\'.join(parts[:-1]))
+        off = fs.find(clus, to83(parts[-1]))
+        if off is None:
+            sys.exit('no such entry: %s' % args[0])
+        bits = {'r': 0x01, 'h': 0x02, 's': 0x04, 'a': 0x20}
+        attr = fs.img[off + 11]
+        for spec in args[1:]:
+            on = not spec.startswith('-')
+            for ch in spec.lstrip('+-').lower():
+                attr = (attr | bits[ch]) if on else (attr & ~bits[ch])
+        fs.img[off + 11] = attr
         fs.save()
     elif cmd == 'ls' and len(args) <= 1:
         clus = fs.resolve(args[0] if args else '')
