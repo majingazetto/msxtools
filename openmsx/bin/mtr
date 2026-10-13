@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Tides-Rider launcher
+# Usage: mtr [variant] [cartridge.rom|openmsx args...]
+#
+# Variants (optional, default: nortc):
+#   nortc     Tides_Rider_MSX2P_NoRTC   MSX2+, 512 kB, no RP5C01 RTC
+#   rtc       Tides_Rider_MSX2P_RTC     MSX2+, 512 kB, RP5C01 RTC (CMOS kept)
+#   128k      Tides_Rider_MSX2P_128K    NoRTC with a 128 kB mapper
+#   256k      Tides_Rider_MSX2P_256K    NoRTC with a 256 kB mapper
+#   msx1      Tides_Rider_MSX1_PAL      MSX1 PAL
+#
+# The machines and the SPI/SD emulation script come from msx_dma_sw/openmsx
+# (`make setup-machines` there, or msxtools/openmsx/install.sh). The script is
+# found next to msxtools whatever the workspace root is (~/Code/brew/MSX on the
+# Mac mini, ~/Code/brew on the MacBook Air); TR_EMU overrides it.
+
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+WORKSPACE=$(cd "$(dirname "$SELF")/../../.." && pwd)
+SCRIPT_EMU=${TR_EMU:-$WORKSPACE/msx_dma_sw/openmsx/scripts/tides_rider_spi_emu.tcl}
+MACHINE="Tides_Rider_MSX2P_NoRTC"
+
+case "$1" in
+  nortc|no-rtc|NORTC) MACHINE="Tides_Rider_MSX2P_NoRTC"; shift ;;
+  rtc|RTC)            MACHINE="Tides_Rider_MSX2P_RTC";   shift ;;
+  128k|128K)          MACHINE="Tides_Rider_MSX2P_128K";  shift ;;
+  256k|256K)          MACHINE="Tides_Rider_MSX2P_256K";  shift ;;
+  msx1|MSX1)          MACHINE="Tides_Rider_MSX1_PAL";    shift ;;
+esac
+
+if [ ! -f "$SCRIPT_EMU" ]; then
+  echo "mtr: $SCRIPT_EMU not found (set TR_EMU)" >&2
+  exit 1
+fi
+
+if [ $# -gt 0 ] && [ -f "$1" ]; then
+  FILE="$1"; shift
+  exec openmsx -machine "$MACHINE" -script "$SCRIPT_EMU" -carta "$FILE" "$@"
+fi
+exec openmsx -machine "$MACHINE" -script "$SCRIPT_EMU" "$@"
