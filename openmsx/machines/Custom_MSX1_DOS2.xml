@@ -1,0 +1,85 @@
+<?xml version="1.0" ?>
+<!DOCTYPE msxconfig SYSTEM 'msxconfig2.dtd'>
+<msxconfig>
+
+  <info>
+    <manufacturer>Sony</manufacturer>
+    <code>Custom_MSX1_DOS2</code>
+    <release_year>1986</release_year>
+    <description>Sony HB-20P with slot 3 expanded: a 128 kB memory mapper and a Sony HBD-20W disk interface. Both cartridge slots stay free, so a Nextor kernel fits. MSX-DOS 2 does not run on an MSX1; Nextor does.</description>
+    <type>MSX</type>
+    <region>es</region>
+  </info>
+
+  <CassettePort/>
+
+  <devices>
+
+    <PPI id="ppi">
+      <sound><volume>16000</volume></sound>
+      <io base="0xA8" num="4"/>
+      <keyboard_type>es</keyboard_type>
+      <has_keypad>false</has_keypad>
+      <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
+      <code_kana_locks>false</code_kana_locks>
+      <graph_locks>false</graph_locks>
+    </PPI>
+
+    <VDP id="VDP">
+      <version>T6950PAL</version>
+      <io base="0x98" num="2"/>
+    </VDP>
+
+    <PSG id="PSG">
+      <type>YM2149</type>
+      <sound><volume>21000</volume></sound>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections>
+    </PSG>
+
+    <PrinterPort id="Printer Port">
+      <io base="0x90" num="2"/>
+    </PrinterPort>
+
+    <primary slot="0">
+      <ROM id="MSX BIOS with BASIC ROM">
+        <rom>
+          <filename>hb-20p_basic-bios1.rom</filename>
+          <sha1>63050d2d21214a721cc55f152c22b7be8061ac33</sha1>
+        </rom>
+        <mem base="0x0000" size="0x8000"/>
+      </ROM>
+    </primary>
+
+    <primary external="true" slot="1"/>
+
+    <primary external="true" slot="2"/>
+
+    <primary slot="3">
+
+      <secondary slot="0">
+        <MemoryMapper id="Main RAM">
+          <mem base="0x0000" size="0x10000"/>
+          <size>128</size>
+        </MemoryMapper>
+      </secondary>
+
+      <secondary slot="1">
+        <WD2793 id="Sony HBD-20W diskROM/FDC">
+          <connectionstyle>Philips</connectionstyle>
+          <motor_off_timeout_ms>4000</motor_off_timeout_ms>
+          <mem base="0x4000" size="0x8000"/>
+          <rom_visibility base="0x4000" size="0x4000"/>
+          <rom>
+            <sha1>12f2cc79b3d09723840bae774be48c0d721ec1c6</sha1>
+            <filename>hbd-20w.rom</filename>
+          </rom>
+          <drives>1</drives>
+        </WD2793>
+      </secondary>
+
+    </primary>
+
+  </devices>
+
+</msxconfig>

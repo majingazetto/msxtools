@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# MSX1 launcher
+# Usage: m1 [build] [variant] [openmsx args...]
+#
+# Build (optional, default: sys):
+#   tsx       openMSX TSX custom build  (~/builds/openMSX_TSX)
+#   sys       openMSX on the PATH (official release)
+#
+# Variants (optional, default: hb20p):
+#   hb20p     Sony HB-20P original
+#   ntsc      Sony HB-10 (NTSC)
+#   8k        Custom  8KB RAM (#E000-#FFFF)
+#   16k       Custom 16KB RAM (#C000-#FFFF)
+#   32k       Custom 48KB RAM (#4000-#FFFF)
+#   ms        Custom 64KB multi-slot (4x16KB slot-3 subslots, carts on 1+2)
+
+# The TSX build lands in a platform-named directory; take whichever exists.
+OPENMSX_TSX=${OPENMSX_TSX:-$(ls -d ~/builds/openMSX_TSX/derived/*/bindist/openMSX.app/Contents/MacOS/openmsx \
+                               ~/builds/openMSX_TSX/derived/*/bindist/install/bin/openmsx 2>/dev/null | head -1)}
+OPENMSX_TSX_SYSTEM_DATA=~/builds/openMSX_TSX/share
+OPENMSX_TSX_USER_DATA=~/.openMSX/share
+OPENMSX_SYS=openmsx
+
+BUILD="sys"
+MACHINE="Sony_HB-20P"
+
+# Parse leading build selector
+case "$1" in
+  tsx|TSX)  BUILD="tsx"; shift ;;
+  sys|SYS)  BUILD="sys"; shift ;;
+esac
+
+# Parse machine variant
+case "$1" in
+  hb20p|hb-20p)        MACHINE="Sony_HB-20P";               shift ;;
+  ntsc)                MACHINE="Sony_HB-10";                 shift ;;
+  8k|8K)               MACHINE="Custom_MSX1_8K";            shift ;;
+  16k|16K)             MACHINE="Custom_MSX1_16K";           shift ;;
+  32k|32K)             MACHINE="Custom_MSX1_32K";           shift ;;
+  ms|64k|64K|multi*)   MACHINE="Custom_MSX1_64K_MultiSlot"; shift ;;
+esac
+
+if [ "$BUILD" = "tsx" ]; then
+  exec env OPENMSX_USER_DATA="$OPENMSX_TSX_USER_DATA" \
+           OPENMSX_SYSTEM_DATA="$OPENMSX_TSX_SYSTEM_DATA" \
+      "$OPENMSX_TSX" -machine "$MACHINE" "$@"
+else
+  exec "$OPENMSX_SYS" -machine "$MACHINE" "$@"
+fi

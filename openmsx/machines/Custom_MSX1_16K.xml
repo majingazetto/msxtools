@@ -1,0 +1,81 @@
+<?xml version="1.0" ?>
+<!DOCTYPE msxconfig SYSTEM 'msxconfig2.dtd'>
+<msxconfig>
+
+  <info>
+    <manufacturer>Custom</manufacturer>
+    <code>Custom_MSX1_16K</code>
+    <release_year>2026</release_year>
+    <description>Custom MSX1 based on Sony HB-20P with 16KB RAM at
+0xC000-0xFFFF (page 3 only). Classic minimal MSX1 RAM layout — stack and
+heap live in page 3, BIOS/BASIC in slot 0, two external cartridge ports.
+  Slot 0: BIOS + BASIC ROM (0x0000-0x7FFF)
+  Slot 1: external cartridge
+  Slot 2: external cartridge
+  Slot 3: 16KB RAM (0xC000-0xFFFF)
+</description>
+    <type>MSX</type>
+    <region>es</region>
+  </info>
+
+  <CassettePort/>
+
+  <devices>
+
+    <PPI id="ppi">
+      <sound>
+        <volume>16000</volume>
+      </sound>
+      <io base="0xA8" num="4"/>
+      <keyboard_type>es</keyboard_type>
+      <has_keypad>false</has_keypad>
+      <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
+      <code_kana_locks>false</code_kana_locks>
+      <graph_locks>false</graph_locks>
+    </PPI>
+
+    <VDP id="VDP">
+      <version>T6950PAL</version>
+      <io base="0x98" num="2"/>
+    </VDP>
+
+    <PSG id="PSG">
+      <type>YM2149</type>
+      <sound>
+        <volume>21000</volume>
+      </sound>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections>
+    </PSG>
+
+    <PrinterPort id="Printer Port">
+      <io base="0x90" num="2"/>
+    </PrinterPort>
+
+    <!-- Slot 0: BIOS + BASIC ROM (pages 0 and 1, 32KB) -->
+    <primary slot="0">
+      <ROM id="MSX BIOS with BASIC ROM">
+        <rom>
+          <filename>hb-20p_basic-bios1.rom</filename>
+          <sha1>63050d2d21214a721cc55f152c22b7be8061ac33</sha1>
+        </rom>
+        <mem base="0x0000" size="0x8000"/>
+      </ROM>
+    </primary>
+
+    <!-- Slot 1: external cartridge port -->
+    <primary external="true" slot="1"/>
+
+    <!-- Slot 2: external cartridge port -->
+    <primary external="true" slot="2"/>
+
+    <!-- Slot 3: 16KB RAM at page 3 (0xC000-0xFFFF) -->
+    <primary slot="3">
+      <RAM id="Main RAM 16K">
+        <mem base="0xC000" size="0x4000"/>
+      </RAM>
+    </primary>
+
+  </devices>
+
+</msxconfig>

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# MSX2 / MSX-DOS 2 & Nextor launcher  (official openMSX release)
+# Usage: m2d2 [machine] [kernel] [FILE.DSK] [openmsx args...]
+#
+# Machines (optional, default: boosted):
+#   boosted       Boosted_MSX2_EN   MSX2, 2048 kB mapper, V9958/192 kB
+#   128k / 8250   Philips_NMS_8250  MSX2,  128 kB mapper -- min-spec check
+#   jp            Boosted_MSX2+_JP  MSX2+, 2048 kB mapper, Japanese BIOS/charset
+#   f1xv          Sony_HB-F1XV + ram512k  stock Japanese MSX2+ (64 kB, too few
+#                 segments on its own) with a 512 kB mapper cartridge
+#
+# Japanese machines put kana where the international charset has the accented
+# letters (#80-#AF), so they are where a manual or a file in the wrong charset
+# shows up.  The editors draw with their own .FNT and are not affected.
+#
+# Kernels (optional, default: dos2):
+#   dos2          MSX-DOS 2.20 cartridge (-ext msxdos2)
+#   nextor        Nextor 2.1.1 Standalone Kernel cartridge (-ext nextor)
+#   nextor-ide    Sunrise IDE Nextor 2.1.1 with 100MB HD (-ext SunriseIDE_Nextor)
+#
+# The DOS 2 / Nextor kernel lives in a cartridge ROM: MSXDOS2.SYS or NEXTOR.SYS
+# on the floppy is NOT enough on its own -- without the cart the machine boots to BASIC.
+#
+# The first argument ending in .dsk/.DSK is mounted on drive A.
+#
+# Examples:
+#   m2d2 S6ED.DSK                 DOS2 on the 2 MB machine
+#   m2d2 128k S6ED.DSK            DOS2 on a stock 128 kB NMS 8250
+#   m2d2 nextor S6ED.DSK          Nextor 2.1.1 kernel on 2 MB machine
+#   m2d2 128k nextor S6ED.DSK     Nextor 2.1.1 kernel on 128 kB NMS 8250
+#   m2d2 jp S6ED.DSK              DOS2 on a Japanese MSX2+
+#   m2d2 f1xv S6ED.DSK            DOS2 on a Sony HB-F1XV with 512 kB mapper
+#   m2d2 nextor-ide S6ED.DSK      Nextor on Sunrise IDE with HD
+
+OPENMSX=openmsx
+MACHINE="Boosted_MSX2_EN"
+EXT=(-ext msxdos2)
+DISK=()
+RAMEXT=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    boosted)           MACHINE="Boosted_MSX2_EN"; shift ;;
+    128k|128K|8250)    MACHINE="Philips_NMS_8250"; shift ;;
+    jp|JP)             MACHINE="Boosted_MSX2+_JP"; shift ;;
+    f1xv|F1XV)         MACHINE="Sony_HB-F1XV"; RAMEXT=(-ext ram512k); shift ;;
+    nextor|NEXTOR)     EXT=(-ext nextor); shift ;;
+    nextor-ide|ide)    EXT=(-ext SunriseIDE_Nextor); shift ;;
+    dos2|DOS2|msxdos2) EXT=(-ext msxdos2); shift ;;
+    *.dsk|*.DSK)       DISK=(-diska "$1"); shift; break ;;
+    *) break ;;
+  esac
+done
+
+if [[ ${#DISK[@]} -eq 0 && $# -gt 0 ]]; then
+  case "$1" in
+    *.dsk|*.DSK) DISK=(-diska "$1"); shift ;;
+  esac
+fi
+
+exec "$OPENMSX" -machine "$MACHINE" "${RAMEXT[@]}" "${EXT[@]}" "${DISK[@]}" "$@"

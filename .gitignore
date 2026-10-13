@@ -29,3 +29,4 @@ src/dsk2rom/dsk2rom
 src/dsk2rom/bin2h
 src/dsk2rom/dsk2rom.h
 src/ViewSRC/viewsrc
+!openmsx/bin/

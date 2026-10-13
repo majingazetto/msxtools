@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# MSX2+ launcher  (official openMSX release)
+# Usage: m2+ [variant] [FILE.ROM|FILE.DSK] [openmsx args...]
+#
+# Variants (optional, default: boosted):
+#   boosted   Boosted_MSX2+_JP   MSX2+, 2048 kB mapper, V9958 192 kB VRAM, 2 FDD
+#   a1wsx     Panasonic_FS-A1WSX MSX2+, stock
+#
+# A .ROM argument is inserted as a cartridge, a .DSK is mounted on drive A.
+# Pass -romtype after the ROM when the mapper must be forced, e.g.:
+#   m2+ ROM/GHOMAN.ROM -romtype ASCII8
+
+OPENMSX=openmsx
+MACHINE="Boosted_MSX2+_JP"
+
+case "$1" in
+  boosted) MACHINE="Boosted_MSX2+_JP";   shift ;;
+  a1wsx)   MACHINE="Panasonic_FS-A1WSX"; shift ;;
+esac
+
+MEDIA=()
+case "$1" in
+  *.rom|*.ROM) MEDIA=(-cart "$1");  shift ;;
+  *.dsk|*.DSK) MEDIA=(-diska "$1"); shift ;;
+esac
+
+exec "$OPENMSX" -machine "$MACHINE" "${MEDIA[@]}" "$@"

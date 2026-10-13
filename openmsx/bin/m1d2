@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# MSX1 / DOS 2-class kernel launcher  (official openMSX release)
+# Usage: m1d2 [machine] [FILE.DSK] [openmsx args...]
+#
+# Machines (optional, default: 128k):
+#   128k          Custom_MSX1_DOS2      Sony HB-20P, T6950 PAL, Spanish keyboard,
+#                                       slot 3 expanded: 128 kB memory mapper +
+#                                       Sony HBD-20W disk interface.
+#                                       SEGTOT=8, SEGAVL=0 -- the same segment
+#                                       budget as a stock Philips NMS 8250, so
+#                                       mapper exhaustion shows up here.
+#   1mb           Custom_MSX1_DOS2_1M   Same machine with a 1 MB mapper
+#                                       (SEGTOT=64, SEGAVL=56). Use it to debug
+#                                       WITHOUT the segment ceiling -- and never
+#                                       to claim something fits.
+#   cf3300        National_CF-3300      Stock Japanese MSX1 with a built-in FDC,
+#                                       TMS99X8A, plus -ext ram1mb. No custom
+#                                       machine file involved; useful for the
+#                                       Japanese-BIOS keyboard paths (KANA/CODE,
+#                                       GRAPH accents).
+#
+# MSX-DOS 2 DOES NOT RUN ON AN MSX1 -- measured: the kernel halts with PC stuck
+# at #4005 and openMSX reports "DI; HALT detected".  The DOS 2-class kernel here
+# is therefore NEXTOR (-ext nextor, the 2.1.1 standalone ASCII16 ROM), which does
+# boot on an MSX1 and adopts the machine's own disk interface, so -diska works.
+# The kernel lives in a cartridge ROM: NEXTOR.SYS on the floppy is not enough on
+# its own -- without the cart the machine falls back to DOS 1 and asks for the
+# date.  Nextor also needs mapped RAM: on a machine with plain 64 kB it silently
+# degrades to DOS 1.
+#
+# The first argument ending in .dsk/.DSK is mounted on drive A.
+#
+# Examples:
+#   m1d2 S2ED.DSK                 S2ED on the minimum target (0 spare segments)
+#   m1d2 1mb S2ED.DSK             same machine, room to spare
+#   m1d2 cf3300 S2ED.DSK          Japanese MSX1 with a built-in drive
+#   m1d2 S2ED.DSK -ext debugdevice
+
+OPENMSX=openmsx
+MACHINE="Custom_MSX1_DOS2"
+EXT=(-ext nextor)
+DISK=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    128k|128K)         MACHINE="Custom_MSX1_DOS2";    EXT=(-ext nextor); shift ;;
+    1mb|1MB|1m)        MACHINE="Custom_MSX1_DOS2_1M"; EXT=(-ext nextor); shift ;;
+    cf3300|jp)         MACHINE="National_CF-3300";    EXT=(-ext ram1mb -ext nextor); shift ;;
+    *.dsk|*.DSK)       DISK=(-diska "$1"); shift; break ;;
+    *) break ;;
+  esac
+done
+
+if [[ ${#DISK[@]} -eq 0 && $# -gt 0 ]]; then
+  case "$1" in
+    *.dsk|*.DSK) DISK=(-diska "$1"); shift ;;
+  esac
+fi
+
+exec "$OPENMSX" -machine "$MACHINE" "${EXT[@]}" "${DISK[@]}" "$@"
