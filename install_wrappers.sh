@@ -89,4 +89,22 @@ for bin_name in "${binary_tools[@]}"; do
     fi
 done
 
+echo "Installing msxtools shell scripts to $BIN_DIR..."
+
+shell_tools=(
+    "awake:scripts/awake.sh"
+)
+
+for entry in "${shell_tools[@]}"; do
+    name="${entry%%:*}"
+    script_path="$SCRIPT_DIR/${entry#*:}"
+    if [ -f "$script_path" ]; then
+        chmod +x "$script_path"
+        ln -sf "$script_path" "$BIN_DIR/$name"
+        echo "  [Shell symlink] $name -> ${entry#*:}"
+    else
+        echo "  Warning: Script not found: $script_path"
+    fi
+done
+
 echo "msxtools successfully installed into $BIN_DIR."
