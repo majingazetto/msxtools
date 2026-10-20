@@ -9,6 +9,10 @@
 #                                       SEGTOT=8, SEGAVL=0 -- the same segment
 #                                       budget as a stock Philips NMS 8250, so
 #                                       mapper exhaustion shows up here.
+#   256k          Custom_MSX1_DOS2_256K Same machine with a 256 kB mapper: the
+#                                       SXDEV development baseline (an MSX1 a
+#                                       developer would really use: free
+#                                       segments, but not a 1 MB machine).
 #   1mb           Custom_MSX1_DOS2_1M   Same machine with a 1 MB mapper
 #                                       (SEGTOT=64, SEGAVL=56). Use it to debug
 #                                       WITHOUT the segment ceiling -- and never
@@ -44,6 +48,7 @@ DISK=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     128k|128K)         MACHINE="Custom_MSX1_DOS2";    EXT=(-ext nextor); shift ;;
+    256k|256K)         MACHINE="Custom_MSX1_DOS2_256K"; EXT=(-ext nextor); shift ;;
     1mb|1MB|1m)        MACHINE="Custom_MSX1_DOS2_1M"; EXT=(-ext nextor); shift ;;
     cf3300|jp)         MACHINE="National_CF-3300";    EXT=(-ext ram1mb -ext nextor); shift ;;
     *.dsk|*.DSK)       DISK=(-diska "$1"); shift; break ;;

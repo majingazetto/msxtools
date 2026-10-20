@@ -82,6 +82,7 @@ if [[ $CHECK -eq 1 ]]; then
   for f in "$HERE"/machines/*.xml; do try -machine "$(basename "$f" .xml)"; done
   # what the launchers actually start
   try -machine Custom_MSX1_DOS2 -ext nextor
+  try -machine Custom_MSX1_DOS2_256K -ext nextor
   try -machine Custom_MSX1_DOS2_1M -ext nextor
   try -machine National_CF-3300 -ext ram1mb -ext nextor
   try -machine Boosted_MSX2_EN -ext msxdos2
