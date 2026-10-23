@@ -5,7 +5,9 @@
 # Machines (optional, default: 128k):
 #   128k          Custom_MSX1_DOS2      Sony HB-20P, T6950 PAL, Spanish keyboard,
 #                                       slot 3 expanded: 128 kB memory mapper +
-#                                       Sony HBD-20W disk interface.
+#                                       Panasonic FS-FD1A disk interface (never
+#                                       the Sony HBD-20W: its disk ROM hung
+#                                       whole-sector writes under Nextor).
 #                                       SEGTOT=8, SEGAVL=0 -- the same segment
 #                                       budget as a stock Philips NMS 8250, so
 #                                       mapper exhaustion shows up here.
