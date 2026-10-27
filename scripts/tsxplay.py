@@ -283,24 +283,24 @@ class TSXPlay:
                 if len(block_data) >= 10 and block_data[0:10] in (b"\xd0"*10, b"\xd3"*10, b"\xea"*10):
                     is_header = True
                 
-                n_p = 8063 if is_header else 3223
+                # Pilot pulses (2 per cycle), MSX2 TH-5A Table 5.3: long header 16000
+                # cycles at 1200 baud / 32000 at 2400, short header 4000 / 8000
+                cycles = 16000 if is_header else 4000
+                if self.fast: cycles *= 2
+                n_p = cycles * 2
                 t_p, t_0, t_1 = (364, 729, 364) if self.fast else (729, 1458, 729)
-                s1, s2 = (166, 183) if self.fast else (333, 367)
-                
-                dlen = len(block_data)
-                blen = 21 + dlen
+
+                # Standard TZX 1.21 block 4B: pause, pilot, pilot count, zero, one,
+                # BitCfg, ByteCfg, data. No sync pulses, no inner length field.
                 f.write(b"\x4B")
-                f.write(struct.pack("<I", blen))
+                f.write(struct.pack("<I", 12 + len(block_data)))
                 f.write(struct.pack("<H", 1000)) # Pause 1s
                 f.write(struct.pack("<H", t_p))
                 f.write(struct.pack("<H", n_p))
-                f.write(struct.pack("<H", s1))
-                f.write(struct.pack("<H", s2))
                 f.write(struct.pack("<H", t_0))
                 f.write(struct.pack("<H", t_1))
-                # MSX Specific: BitCfg=0x24 (2/4 pulses), ByteCfg=0x54 (1 start, 2 stop, LSB)
-                f.write(b"\x24\x54\x08") # Offset 14, 15, 16
-                f.write(struct.pack("<I", dlen))
+                # MSX: BitCfg=0x24 (2 pulses per 0, 4 per 1), ByteCfg=0x54 (1 start 0, 2 stop 1, LSB first)
+                f.write(b"\x24\x54")
                 f.write(block_data)
         print(f"\n {C_GREEN}[√] TSX file saved to:{C_RESET} {C_YELLOW}{tsx_path}{C_RESET}")
 
