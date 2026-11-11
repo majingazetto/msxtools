@@ -9,8 +9,7 @@
 # add up, so several sessions coexist. -w releases it when the owner exits:
 # a session that dies or forgets `awake off` cannot leave the Mac awake, and
 # -t bounds one that stays alive. OWNER is the first ancestor that is not a
-# shell: the `claude` or Gemini CLI process for an agent, `login` for a
-# terminal tab. Never stop caffeinate (or openmsx) by name or pattern
+# shell: the `claude` process for an agent, `login` for a terminal tab. Never stop caffeinate (or openmsx) by name or pattern
 # (killall / pkill -f): that kills every other session's too.
 
 set -u
