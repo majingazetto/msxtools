@@ -35,6 +35,7 @@ python_tools=(
     "png8tops:scripts/png8tops.py"
     "pngpal:scripts/pngpal.py"
     "ACWA:scripts/ACWA.py"
+    "cardsync:scripts/cardsync.py"
 )
 
 for entry in "${python_tools[@]}"; do

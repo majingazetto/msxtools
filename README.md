@@ -21,6 +21,7 @@ Custom MSX development tools and scripts. This repository serves as a centralize
 - **Improved Python 3 Scripts**: Updated versions of standard MSX conversion tools (suffixed with `.py`).
 - **Unified Build System**: A single `Makefile` in the root builds all C tools and installs them to `bin/`.
 - **Verified Graphics Tools**: Specialized converters for Screen 1 (TMS9918), Screen 5, and Screen 8.
+- **cardsync**: keeps a project's MSX tree in step with the Nextor SD card (hash-based, conflicts stop the run, backups, read-back): spec [CARDSYNC.md](./CARDSYNC.md), tests `python3 scripts/test_cardsync.py [--mutations]`.
 
 ## Compilation
 
